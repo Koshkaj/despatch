@@ -1,0 +1,19 @@
+[package]
+name = "despatch-domain"
+version = "0.1.0"
+description = "Framework-free domain model and invariants for Despatch"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+serde.workspace = true
+thiserror.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+
+[lints]
+workspace = true
+

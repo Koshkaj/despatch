@@ -1,0 +1,27 @@
+[package]
+name = "despatch-platform-macos"
+version = "0.1.0"
+description = "macOS platform adapters for Despatch"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+directories.workspace = true
+despatch-application = { path = "../despatch-application" }
+despatch-domain = { path = "../despatch-domain" }
+rustix.workspace = true
+tempfile.workspace = true
+thiserror.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2.workspace = true
+objc2-app-kit = { workspace = true, features = ["NSAccessibilityConstants", "NSAccessibilityElement", "NSAccessibilityProtocols", "NSApplication", "NSBitmapImageRep", "NSColor", "NSColorSpace", "NSFontDescriptor", "NSGraphics", "objc2-core-foundation", "NSGraphicsContext", "NSImage", "NSImageRep", "NSOpenPanel", "NSPanel", "NSResponder", "NSSavePanel", "NSView", "NSWindow"] }
+objc2-foundation = { workspace = true, features = ["NSArray", "NSDictionary", "NSGeometry", "NSObject", "NSString"] }
+
+[dev-dependencies]
+serde_json.workspace = true
+uuid.workspace = true
+
+[lints]
+workspace = true

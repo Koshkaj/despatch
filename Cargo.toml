@@ -1,0 +1,61 @@
+[workspace]
+members = [
+    "apps/despatch",
+    "crates/despatch-application",
+    "crates/despatch-config",
+    "crates/despatch-domain",
+    "crates/despatch-probe",
+    "crates/despatch-platform-macos",
+    "crates/despatch-ui-iced",
+]
+resolver = "2"
+
+[workspace.package]
+edition = "2024"
+license = "MIT OR Apache-2.0"
+rust-version = "1.88"
+
+[workspace.dependencies]
+anyhow = "1.0.104"
+directories = "6.0.0"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.145"
+sha2 = "0.10.9"
+iced = { version = "=0.14.0", default-features = false, features = [
+    "wgpu",
+    "basic-shaping",
+    "thread-pool",
+    "image-without-codecs",
+    # The drag layer is a widget of our own; see `drag_layer` for why it has to be.
+    "advanced",
+] }
+objc2 = "0.6.4"
+objc2-app-kit = { version = "0.3.2", default-features = false }
+png = "0.17.16"
+objc2-foundation = { version = "0.3.2", default-features = false, features = ["alloc", "NSUserDefaults", "NSString", "NSURL"] }
+rustix = { version = "1.1.4", features = ["process"] }
+tempfile = "3.23.0"
+thiserror = "2.0.17"
+# Test-only: reads the bundled font's own metrics, so the layout constants cannot drift from it.
+ttf-parser = "0.25.1"
+uuid = { version = "1.18.1", features = ["serde", "v7"] }
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+
+[workspace.lints.clippy]
+all = { level = "deny", priority = -1 }
+pedantic = { level = "deny", priority = -1 }
+
+[profile.release]
+codegen-units = 1
+lto = "thin"
+strip = "symbols"
+
+# Dependencies are optimized even in a debug build. The renderer and the text shaper run on every
+# frame, and unoptimized they cost enough per frame that dragging a card lags behind the pointer —
+# an interaction that only exists to be watched. Workspace crates stay at `opt-level = 0`, so a
+# debugger still steps through the app's own code; only third-party code is compiled fast.
+[profile.dev.package."*"]
+opt-level = 3
+codegen-units = 16

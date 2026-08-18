@@ -1,0 +1,22 @@
+[package]
+name = "despatch"
+version = "0.1.0"
+description = "Native macOS utility for organizing server and CLI connections"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[features]
+# Forwards the UI crate's development-only screenshot harness.
+capture = ["despatch-ui-iced/capture"]
+
+[dependencies]
+anyhow.workspace = true
+despatch-application = { path = "../../crates/despatch-application" }
+despatch-config = { path = "../../crates/despatch-config" }
+despatch-platform-macos = { path = "../../crates/despatch-platform-macos" }
+despatch-probe = { path = "../../crates/despatch-probe" }
+despatch-ui-iced = { path = "../../crates/despatch-ui-iced" }
+
+[lints]
+workspace = true

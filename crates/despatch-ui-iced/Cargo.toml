@@ -1,0 +1,26 @@
+[package]
+name = "despatch-ui-iced"
+version = "0.1.0"
+description = "GPU-rendered Iced UI adapter for Despatch"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[features]
+# Development-only screenshot harness; never enabled for a release build.
+capture = []
+
+[dependencies]
+despatch-application = { path = "../despatch-application" }
+despatch-domain = { path = "../despatch-domain" }
+despatch-platform-macos = { path = "../despatch-platform-macos" }
+iced.workspace = true
+png.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+iced_test = "0.14"
+ttf-parser.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,16 @@
+[package]
+name = "despatch-probe"
+version = "0.1.0"
+description = "Reachability checks for Despatch servers, without authenticating"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+despatch-application = { path = "../despatch-application" }
+
+[dev-dependencies]
+despatch-domain = { path = "../despatch-domain" }
+
+[lints]
+workspace = true

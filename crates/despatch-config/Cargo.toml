@@ -1,0 +1,22 @@
+[package]
+name = "despatch-config"
+version = "0.1.0"
+description = "Versioned JSON configuration persistence for Despatch"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+despatch-application = { path = "../despatch-application" }
+despatch-domain = { path = "../despatch-domain" }
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+tempfile.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+uuid.workspace = true
+
+[lints]
+workspace = true

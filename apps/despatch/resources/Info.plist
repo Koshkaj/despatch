@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>en</string>
+    <key>CFBundleDisplayName</key>
+    <string>Despatch</string>
+    <key>CFBundleExecutable</key>
+    <string>Despatch</string>
+    <key>CFBundleIconFile</key>
+    <string>Despatch</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.despatch.app</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundleName</key>
+    <string>Despatch</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>0.1.0</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>13.0</string>
+    <key>NSHighResolutionCapable</key>
+    <true/>
+    <key>NSAppleEventsUsageDescription</key>
+    <string>Despatch uses Ghostty's scripting interface to open the server or agent you activate.</string>
+    <key>NSHumanReadableCopyright</key>
+    <string>Copyright © 2026 Despatch contributors</string>
+</dict>
+</plist>

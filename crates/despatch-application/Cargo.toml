@@ -1,0 +1,17 @@
+[package]
+name = "despatch-application"
+version = "0.1.0"
+description = "Framework-free application state and use cases for Despatch"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+despatch-domain = { path = "../despatch-domain" }
+thiserror.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,97 @@
+name: release
+
+# Cutting a release is pushing a tag. Everything below is what `make dmg` does locally, so a
+# release can be reproduced by hand when the runner is not an option.
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  dmg:
+    runs-on: macos-15
+    env:
+      # The bundle claims macOS 13, so the binary has to be built against it. Without this the
+      # runner's own SDK version becomes the floor and the claim in Info.plist is a lie.
+      MACOSX_DEPLOYMENT_TARGET: "13.0"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy,rustfmt
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - uses: Swatinem/rust-cache@v2
+
+      # A tag that disagrees with the version in the bundle is a release nobody can identify
+      # later, so it fails here rather than after publishing.
+      - name: Check the tag against the workspace version
+        run: |
+          source scripts/version.sh
+          version="$(despatch_version "$PWD")"
+          tag="${GITHUB_REF_NAME#v}"
+          if [ "$GITHUB_REF_TYPE" = "tag" ] && [ "$tag" != "$version" ]; then
+            echo "tag $GITHUB_REF_NAME does not match workspace version $version" >&2
+            exit 1
+          fi
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+
+      - name: Test
+        run: |
+          cargo fmt --all -- --check
+          cargo clippy --workspace --all-targets --all-features -- -D warnings
+          cargo test --workspace --all-features
+
+      - name: Build the disk image
+        run: make dmg
+
+      # The bundle only works if it is signed, and the runner signs ad hoc. This also asserts the
+      # release is universal, which an arm64 runner will happily not be if the lipo step is lost.
+      - name: Verify the bundle
+        run: ./scripts/verify-app.sh target/release/Despatch.app
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Despatch-${{ env.VERSION }}.dmg
+          path: target/release/Despatch-${{ env.VERSION }}.dmg
+
+      - name: Publish the release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Ad-hoc signed, so Gatekeeper quarantines the download. Saying so in the release notes
+          # is the difference between a first run and a bug report about a damaged app.
+          cat > notes.md <<'NOTES'
+          ## Install
+
+          1. Open the disk image and drag **Despatch** to Applications. Run it from there, not
+             from the disk image — macOS runs a quarantined app from a read-only shadow copy.
+          2. Despatch is not signed with an Apple Developer ID, so macOS refuses to open it until
+             the download flag is cleared:
+
+             ```sh
+             xattr -dr com.apple.quarantine /Applications/Despatch.app
+             ```
+
+             Right-click → Open no longer works as a bypass on macOS 15 and later.
+
+          ## Notes
+
+          - Universal build; requires macOS 13 or later.
+          - Launches open in whichever terminal you have set as the handler for executables.
+            With none set, that is Terminal.app.
+          - Ghostty is driven through its scripting interface, so the first launch asks for
+            permission to automate it, and it needs Ghostty 1.3 or later with `macos-applescript`
+            enabled.
+          NOTES
+          gh release create "$GITHUB_REF_NAME" \
+            "target/release/Despatch-$VERSION.dmg" \
+            --title "Despatch $VERSION" \
+            --notes-file notes.md \
+            --generate-notes

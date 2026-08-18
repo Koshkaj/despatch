@@ -1,0 +1,66 @@
+{
+  "schema_version": 2,
+  "revision": 4,
+  "groups": [
+    {
+      "id": "018f46f2-bde0-7cc8-a875-6cbe1a29a227",
+      "name": "Production",
+      "section": "servers",
+      "subgroups": [
+        {
+          "id": "019fec10-0000-7000-8000-00000000a001",
+          "name": "Grafana",
+          "items": [
+            {
+              "type": "ssh",
+              "id": "018f46f4-1a77-7df2-a70a-85ad1c7cb842",
+              "name": "Dashboards",
+              "host": "grafana.example.com",
+              "user": "deploy",
+              "port": 22,
+              "identity_file": "$HOME/.ssh/id_ed25519",
+              "extra_args": []
+            }
+          ]
+        },
+        {
+          "id": "019fec10-0000-7000-8000-00000000a002",
+          "name": "Databases",
+          "items": [
+            {
+              "type": "ssh",
+              "id": "018f46f4-1a77-7df2-a70a-85ad1c7cb843",
+              "name": "Primary",
+              "host": "db-primary.example.com",
+              "user": "postgres",
+              "port": 2222,
+              "extra_args": []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "018f46f6-1d8d-719a-ab37-4cdf0a97924d",
+      "name": "Project tools",
+      "section": "agents",
+      "subgroups": [
+        {
+          "id": "019fec10-0000-7000-8000-00000000b001",
+          "name": "Assistants",
+          "items": [
+            {
+              "type": "agent",
+              "id": "018f46f7-319c-7ce2-8111-94aad70bb783",
+              "name": "Codex",
+              "provider": "codex",
+              "executable": "codex",
+              "working_directory": "../project",
+              "args": []
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

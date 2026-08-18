@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "revision": 4,
+  "groups": [
+    {
+      "id": "018f46f2-bde0-7cc8-a875-6cbe1a29a227",
+      "name": "Production",
+      "section": "servers",
+      "items": [
+        {
+          "type": "ssh",
+          "id": "018f46f4-1a77-7df2-a70a-85ad1c7cb842",
+          "name": "API server",
+          "host": "api.example.com",
+          "user": "deploy",
+          "port": 22,
+          "identity_file": "$HOME/.ssh/id_ed25519",
+          "extra_args": []
+        }
+      ]
+    },
+    {
+      "id": "018f46f6-1d8d-719a-ab37-4cdf0a97924d",
+      "name": "Project tools",
+      "section": "agents",
+      "items": [
+        {
+          "type": "agent",
+          "id": "018f46f7-319c-7ce2-8111-94aad70bb783",
+          "name": "Codex",
+          "provider": "codex",
+          "executable": "codex",
+          "working_directory": "../project",
+          "args": []
+        }
+      ]
+    }
+  ]
+}
