@@ -13,7 +13,7 @@ permissions:
   contents: read
 
 jobs:
-  check:
+  lint:
     runs-on: macos-15
     env:
       # The bundle claims macOS 13, so the binary has to be built against it. Without this the
@@ -30,7 +30,22 @@ jobs:
 
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
-      - run: cargo test --workspace --all-features
+
+  test:
+    runs-on: macos-15
+    env:
+      MACOSX_DEPLOYMENT_TARGET: "13.0"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      # `--no-fail-fast` so one broken crate does not hide the state of the rest: without it cargo
+      # stops at the first failing test binary and the log names one failure out of however many
+      # there are.
+      - run: cargo test --workspace --all-features --no-fail-fast
 
       # The bundle scripts are part of the build, so a broken one fails on the branch that broke
       # it rather than at the tag. Debug, not release: the release profile is universal, and two
@@ -39,7 +54,9 @@ jobs:
       - run: ./scripts/verify-app.sh target/debug/Despatch.app
 
   release:
-    needs: check
+    # Both gates, named. A job that needs another runs only when that one succeeded, so a red
+    # test suite skips the release rather than publishing around it.
+    needs: [lint, test]
     if: github.ref_type == 'tag' || github.event_name == 'workflow_dispatch'
     runs-on: macos-15
     permissions:
