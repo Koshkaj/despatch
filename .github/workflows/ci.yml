@@ -1,26 +1,112 @@
-name: CI
+name: ci
 
+# One workflow. Every push and pull request runs the checks; a `v*` tag runs them and then
+# publishes the disk image, so nothing is released that has not been through the same gate.
 on:
   push:
+    branches: ["**"]
+    tags: ["v*"]
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
-  quality:
+  check:
     runs-on: macos-15
+    env:
+      # The bundle claims macOS 13, so the binary has to be built against it. Without this the
+      # runner's own SDK version becomes the floor and the claim in Info.plist is a lie.
+      MACOSX_DEPLOYMENT_TARGET: "13.0"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy,rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+      - run: cargo test --workspace --all-features
+
+      # The bundle scripts are part of the build, so a broken one fails on the branch that broke
+      # it rather than at the tag. Debug, not release: the release profile is universal, and two
+      # full builds of the renderer on every push buys nothing a tag build does not already prove.
+      - run: ./scripts/bundle-app.sh
+      - run: ./scripts/verify-app.sh target/debug/Despatch.app
+
+  release:
+    needs: check
+    if: github.ref_type == 'tag' || github.event_name == 'workflow_dispatch'
+    runs-on: macos-15
+    permissions:
+      contents: write
     env:
       MACOSX_DEPLOYMENT_TARGET: "13.0"
     steps:
       - uses: actions/checkout@v4
+
       - uses: dtolnay/rust-toolchain@stable
         with:
-          components: clippy,rustfmt
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
       - uses: Swatinem/rust-cache@v2
-      - run: cargo fmt --all -- --check
-      - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
-      - run: cargo test --workspace --all-features
-      - run: cargo build --workspace --release
-      - run: ./scripts/bundle-app.sh --release
-      - run: ./scripts/verify-app.sh target/release/Despatch.app
+
+      # A tag that disagrees with the version in the bundle is a release nobody can identify
+      # later, so it fails here rather than after publishing. A manual run has no tag to check.
+      - name: Check the tag against the workspace version
+        run: |
+          source scripts/version.sh
+          version="$(despatch_version "$PWD")"
+          tag="${GITHUB_REF_NAME#v}"
+          if [ "$GITHUB_REF_TYPE" = "tag" ] && [ "$tag" != "$version" ]; then
+            echo "tag $GITHUB_REF_NAME does not match workspace version $version" >&2
+            exit 1
+          fi
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+
+      - name: Build the disk image
+        run: make dmg
+
+      # The bundle only works if it is signed, and the runner signs ad hoc. This also asserts the
+      # release is universal, which an arm64 runner will happily not be if the lipo step is lost.
+      - name: Verify the bundle
+        run: ./scripts/verify-app.sh target/release/Despatch.app
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Despatch-${{ env.VERSION }}.dmg
+          path: target/release/Despatch-${{ env.VERSION }}.dmg
+
+      - name: Publish the release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Ad-hoc signed, so Gatekeeper quarantines the download. Saying so in the release notes
+          # is the difference between a first run and a bug report about a damaged app.
+          cat > notes.md <<'NOTES'
+          ## Install
+
+          1. Open the disk image and drag **Despatch** to Applications. Run it from there, not
+             from the disk image — macOS runs a quarantined app from a read-only shadow copy.
+          2. Despatch is not signed with an Apple Developer ID, so macOS refuses to open it until
+             the download flag is cleared:
+
+             ```sh
+             xattr -dr com.apple.quarantine /Applications/Despatch.app
+             ```
+
+             Right-click → Open no longer works as a bypass on macOS 15 and later.
+
+          Universal build; requires macOS 13 or later. Launches open in whichever terminal you
+          have set as the handler for executables, and in Terminal.app when you have set none.
+          NOTES
+          gh release create "$GITHUB_REF_NAME" \
+            "target/release/Despatch-$VERSION.dmg" \
+            --title "Despatch $VERSION" \
+            --notes-file notes.md \
+            --generate-notes
