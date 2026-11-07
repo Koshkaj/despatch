@@ -22,6 +22,17 @@ pub fn requested() -> Option<PathBuf> {
     std::env::var_os("DESPATCH_CAPTURE").map(PathBuf::from)
 }
 
+/// The directory a live self-test writes its photographs to, taken from `DESPATCH_LIVE_TEST`.
+///
+/// A live run is the real menu-bar app: it installs its item, opens its panel under it, and then
+/// drives it through the item the way a click would, reporting what the window server says after
+/// each step. Unlike a capture, it photographs the composited window, so the panel's transparent
+/// corners and its shadow are in the picture.
+#[must_use]
+pub fn live() -> Option<PathBuf> {
+    std::env::var_os("DESPATCH_LIVE_TEST").map(PathBuf::from)
+}
+
 /// The interface state to open before capturing, taken from `DESPATCH_CAPTURE_SCENE`.
 #[must_use]
 pub fn scene() -> Option<String> {
@@ -36,6 +47,18 @@ pub fn appearance_override() -> Option<bool> {
         "light" => Some(false),
         _ => None,
     }
+}
+
+/// Forces Increase Contrast for a capture run, taken from `DESPATCH_CAPTURE_CONTRAST=increased`.
+#[must_use]
+pub fn increased_contrast_override() -> bool {
+    std::env::var("DESPATCH_CAPTURE_CONTRAST").is_ok_and(|value| value == "increased")
+}
+
+/// Forces Reduce Motion for a live run, taken from `DESPATCH_LIVE_REDUCE_MOTION=1`.
+#[must_use]
+pub fn reduce_motion_override() -> bool {
+    std::env::var("DESPATCH_LIVE_REDUCE_MOTION").is_ok_and(|value| value == "1")
 }
 
 /// Waits for the first frame to render, then grabs the window contents.

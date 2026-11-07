@@ -12,27 +12,23 @@ use crate::theme;
 /// shipping hand-drawn substitutes.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum Symbol {
-    Servers,
-    Agents,
     Category,
+    Group,
     Server,
-    Agent,
-    Claude,
-    Codex,
-    Gemini,
-    OpenCode,
-    Custom,
+    App,
     Add,
     Search,
     Settings,
-    Launch,
+    Recent,
+    Click,
     Edit,
     Duplicate,
     Delete,
-    Reveal,
+    Pin,
+    Pinned,
     Error,
     Success,
-    Close,
+    Clear,
     Expand,
     Collapse,
 }
@@ -41,29 +37,23 @@ impl Symbol {
     /// The `AppKit` system symbol name.
     const fn name(self) -> &'static str {
         match self {
-            Self::Servers => "square.stack.3d.up.fill",
-            Self::Agents => "sparkles",
             Self::Category => "folder.fill",
+            Self::Group => "folder",
             Self::Server => "server.rack",
-            Self::Agent => "terminal.fill",
-            // Stand-in marks, not brand logos: shipping the real ones means shipping someone
-            // else's trademark, which is a licensing decision rather than a drawing decision.
-            Self::Claude => "asterisk",
-            Self::Codex => "chevron.left.slash.chevron.right",
-            Self::Gemini => "sparkle",
-            Self::OpenCode => "curlybraces",
-            Self::Custom => "chevron.left.forwardslash.chevron.right",
+            Self::App => "terminal",
             Self::Add => "plus",
             Self::Search => "magnifyingglass",
-            Self::Settings => "gearshape.fill",
-            Self::Launch => "arrow.up.forward",
+            Self::Settings => "gearshape",
+            Self::Recent => "clock",
+            Self::Click => "cursorarrow.click.2",
             Self::Edit => "pencil",
             Self::Duplicate => "plus.square.on.square",
             Self::Delete => "trash",
-            Self::Reveal => "folder",
+            Self::Pin => "pin",
+            Self::Pinned => "pin.fill",
             Self::Error => "exclamationmark.triangle.fill",
             Self::Success => "checkmark.circle.fill",
-            Self::Close => "xmark",
+            Self::Clear => "xmark.circle.fill",
             Self::Expand => "chevron.down",
             Self::Collapse => "chevron.up",
         }
@@ -72,54 +62,46 @@ impl Symbol {
     /// The `VoiceOver` description for the symbol.
     const fn accessibility_label(self) -> &'static str {
         match self {
-            Self::Servers => "servers",
-            Self::Agents => "agents",
             Self::Category => "category",
+            Self::Group => "group",
             Self::Server => "server",
-            Self::Agent => "command-line agent",
-            Self::Claude => "Claude",
-            Self::Codex => "Codex",
-            Self::Gemini => "Gemini",
-            Self::OpenCode => "OpenCode",
-            Self::Custom => "custom command",
+            Self::App => "Despatch",
             Self::Add => "add",
             Self::Search => "search",
             Self::Settings => "settings",
-            Self::Launch => "launch",
+            Self::Recent => "recently used",
+            Self::Click => "double-click",
             Self::Edit => "edit",
             Self::Duplicate => "duplicate",
             Self::Delete => "delete",
-            Self::Reveal => "reveal in Finder",
+            Self::Pin => "keep open",
+            Self::Pinned => "pinned open",
             Self::Error => "error",
             Self::Success => "success",
-            Self::Close => "close",
+            Self::Clear => "clear",
             Self::Expand => "show additional settings",
             Self::Collapse => "hide additional settings",
         }
     }
 
-    const ALL: [Self; 23] = [
-        Self::Servers,
-        Self::Agents,
+    const ALL: [Self; 19] = [
         Self::Category,
+        Self::Group,
         Self::Server,
-        Self::Agent,
-        Self::Claude,
-        Self::Codex,
-        Self::Gemini,
-        Self::OpenCode,
-        Self::Custom,
+        Self::App,
         Self::Add,
         Self::Search,
         Self::Settings,
-        Self::Launch,
+        Self::Recent,
+        Self::Click,
         Self::Edit,
         Self::Duplicate,
         Self::Delete,
-        Self::Reveal,
+        Self::Pin,
+        Self::Pinned,
         Self::Error,
         Self::Success,
-        Self::Close,
+        Self::Clear,
         Self::Expand,
         Self::Collapse,
     ];
@@ -258,77 +240,8 @@ fn scale_alpha(coverage: u8, alpha: f32) -> u8 {
     (f32::from(coverage) * alpha.clamp(0.0, 1.0)).round() as u8
 }
 
-/// The provider marks that ship with the app rather than coming from the system symbol set.
-///
-/// These are the providers' own brand glyphs, in the single-color form published by the
-/// [Simple Icons](https://simpleicons.org) project (CC0). Each trademark belongs to its owner and
-/// is used here only to name the tool the launcher runs. They are monochrome by design, which is
-/// what lets them go through the same coverage-mask tinting as every other symbol.
-const fn bundled_logo(symbol: Symbol) -> Option<&'static [u8]> {
-    match symbol {
-        Symbol::Claude => Some(include_bytes!("../assets/logos/claude.png")),
-        Symbol::Codex => Some(include_bytes!("../assets/logos/codex.png")),
-        Symbol::Gemini => Some(include_bytes!("../assets/logos/gemini.png")),
-        Symbol::OpenCode => Some(include_bytes!("../assets/logos/opencode.png")),
-        _ => None,
-    }
-}
-
-/// Turns a bundled logo into a coverage mask.
-///
-/// Only the alpha channel survives. The glyph's own color is discarded so the mark can be tinted
-/// to whatever the interface needs, exactly like a system symbol.
-fn decode_logo(bytes: &[u8]) -> Option<Mask> {
-    let mut reader = png::Decoder::new(bytes).read_info().ok()?;
-    let mut buffer = vec![0; reader.output_buffer_size()];
-    let info = reader.next_frame(&mut buffer).ok()?;
-    if info.bit_depth != png::BitDepth::Eight {
-        return None;
-    }
-    let channels = match info.color_type {
-        png::ColorType::Rgba => 4,
-        png::ColorType::Rgb => 3,
-        png::ColorType::GrayscaleAlpha => 2,
-        png::ColorType::Grayscale => 1,
-        png::ColorType::Indexed => return None,
-    };
-    let rgba = buffer[..info.buffer_size()]
-        .chunks_exact(channels)
-        .flat_map(|pixel| [u8::MAX, u8::MAX, u8::MAX, coverage(pixel, channels)])
-        .collect();
-    Some(Mask {
-        width: info.width,
-        height: info.height,
-        rgba,
-    })
-}
-
-/// How much of a pixel the glyph covers.
-///
-/// A logo may arrive either as ink on transparency or as ink on white, depending on what
-/// rasterized it, and the two are indistinguishable without looking at both channels: a glyph
-/// flattened onto white is fully opaque everywhere, so alpha alone would report a solid block.
-/// Darkness is what carries the shape in that case, so coverage is alpha scaled by how dark the
-/// pixel is, which reads both forms correctly.
-fn coverage(pixel: &[u8], channels: usize) -> u8 {
-    let luminance = |pixel: &[u8]| {
-        (u32::from(pixel[0]) * 299 + u32::from(pixel[1]) * 587 + u32::from(pixel[2]) * 114) / 1000
-    };
-    let (light, alpha) = match channels {
-        4 => (luminance(pixel), u32::from(pixel[3])),
-        3 => (luminance(pixel), 255),
-        2 => (u32::from(pixel[0]), u32::from(pixel[1])),
-        _ => (u32::from(pixel[0]), 255),
-    };
-    let darkness = 255_u32.saturating_sub(light);
-    u8::try_from(alpha * darkness / 255).unwrap_or(u8::MAX)
-}
-
 #[cfg(target_os = "macos")]
 fn load_mask(symbol: Symbol) -> Option<Mask> {
-    if let Some(logo) = bundled_logo(symbol) {
-        return decode_logo(logo);
-    }
     let pixels =
         despatch_platform_macos::render_system_symbol(symbol.name(), symbol.accessibility_label())?;
     Some(Mask {
@@ -339,8 +252,8 @@ fn load_mask(symbol: Symbol) -> Option<Mask> {
 }
 
 #[cfg(not(target_os = "macos"))]
-fn load_mask(symbol: Symbol) -> Option<Mask> {
-    bundled_logo(symbol).and_then(decode_logo)
+fn load_mask(_symbol: Symbol) -> Option<Mask> {
+    None
 }
 
 #[cfg(test)]
@@ -383,36 +296,6 @@ mod tests {
         assert_eq!(scale_alpha(255, 0.5), 128);
         assert_eq!(scale_alpha(0, 1.0), 0);
         assert_eq!(scale_alpha(200, 2.0), 200);
-    }
-
-    #[test]
-    fn every_bundled_provider_logo_decodes_to_a_square_coverage_mask() {
-        for symbol in [
-            Symbol::Claude,
-            Symbol::Codex,
-            Symbol::Gemini,
-            Symbol::OpenCode,
-        ] {
-            let logo = super::bundled_logo(symbol).expect("a bundled logo");
-            let mask = super::decode_logo(logo).expect("a decodable logo");
-
-            assert_eq!(mask.width, mask.height, "{symbol:?} must be square");
-            assert_eq!(mask.rgba.len(), (mask.width * mask.height * 4) as usize);
-            assert!(
-                mask.rgba.chunks_exact(4).any(|pixel| pixel[3] > 200),
-                "{symbol:?} decoded to nothing"
-            );
-            assert!(
-                mask.rgba.chunks_exact(4).any(|pixel| pixel[3] < 40),
-                "{symbol:?} decoded to a solid block rather than a glyph"
-            );
-            assert!(
-                mask.rgba
-                    .chunks_exact(4)
-                    .all(|pixel| pixel[..3] == [u8::MAX; 3]),
-                "{symbol:?} kept its own color instead of becoming a mask"
-            );
-        }
     }
 
     #[test]

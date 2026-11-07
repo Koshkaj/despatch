@@ -10,6 +10,7 @@ use thiserror::Error;
 
 const SELECTED_CONFIG_PATH_KEY: &str = "selectedConfigURL";
 const APPEARANCE_KEY: &str = "appearance";
+const TERMINAL_KEY: &str = "terminal";
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct LocalPreferences {
@@ -79,6 +80,32 @@ impl LocalPreferences {
         Ok(())
     }
 
+    /// The terminal picked for launches, stored as its code in the list of terminals Despatch can
+    /// launch into: like the appearance, a number is what `NSUserDefaults` can store safely.
+    pub fn terminal(&self) -> Result<Option<String>, LocalPreferencesError> {
+        let defaults = self.defaults()?;
+        let stored = defaults.integerForKey(&NSString::from_str(TERMINAL_KEY));
+        Ok(i64::try_from(stored)
+            .ok()
+            .and_then(crate::terminal_for_code)
+            .map(ToOwned::to_owned))
+    }
+
+    /// Remembers the terminal picked for launches; `None`, or a terminal without a code, goes back
+    /// to the system's default.
+    pub fn set_terminal(&self, terminal: Option<&str>) -> Result<(), LocalPreferencesError> {
+        let defaults = self.defaults()?;
+        let key = NSString::from_str(TERMINAL_KEY);
+        match terminal
+            .and_then(crate::terminal_code)
+            .and_then(|code| isize::try_from(code).ok())
+        {
+            Some(code) => defaults.setInteger_forKey(code, &key),
+            None => defaults.removeObjectForKey(&key),
+        }
+        Ok(())
+    }
+
     fn defaults(&self) -> Result<Retained<NSUserDefaults>, LocalPreferencesError> {
         if let Some(suite_name) = &self.suite_name {
             let suite_name = NSString::from_str(suite_name);
@@ -127,6 +154,14 @@ impl LocalPreferencesPort for LocalPreferences {
 
     fn set_appearance(&self, choice: AppearanceChoice) -> Result<(), PortError> {
         LocalPreferences::set_appearance(self, choice).map_err(preference_port_error)
+    }
+
+    fn terminal(&self) -> Result<Option<String>, PortError> {
+        LocalPreferences::terminal(self).map_err(preference_port_error)
+    }
+
+    fn set_terminal(&self, terminal: Option<&str>) -> Result<(), PortError> {
+        LocalPreferences::set_terminal(self, terminal).map_err(preference_port_error)
     }
 }
 
@@ -185,6 +220,35 @@ mod tests {
                 .expect("read cleared preferences"),
             None
         );
+        preferences.clear_suite().expect("remove test suite");
+    }
+
+    #[test]
+    fn the_picked_terminal_round_trips_and_clears_in_an_isolated_suite() {
+        let suite_name = format!("com.despatch.tests.{}", Uuid::now_v7());
+        let preferences = LocalPreferences::with_suite(suite_name).expect("valid suite");
+
+        assert_eq!(preferences.terminal().expect("read empty"), None);
+        preferences
+            .set_terminal(Some("com.mitchellh.ghostty"))
+            .expect("store terminal");
+        assert_eq!(
+            preferences.terminal().expect("read terminal").as_deref(),
+            Some("com.mitchellh.ghostty")
+        );
+        preferences
+            .set_terminal(Some("com.example.unknown-terminal"))
+            .expect("store unknown terminal");
+        assert_eq!(
+            preferences.terminal().expect("read after unknown"),
+            None,
+            "a terminal Despatch cannot launch into is not remembered"
+        );
+        preferences
+            .set_terminal(Some("com.apple.Terminal"))
+            .expect("store terminal");
+        preferences.set_terminal(None).expect("clear terminal");
+        assert_eq!(preferences.terminal().expect("read cleared"), None);
         preferences.clear_suite().expect("remove test suite");
     }
 

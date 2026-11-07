@@ -6,38 +6,38 @@ repository.
 
 ## Product goal
 
-Build **Despatch**, a native macOS desktop utility for organizing and launching server and CLI
-connections.
+Build **Despatch**, a native macOS menu-bar utility for organizing and launching server and CLI
+connections. It lives behind a status item in the menu bar — no Dock icon, no main window — and
+opens a panel under that item.
 
 The finished app must:
 
 1. Use **Rust** for the application and domain code.
 2. Use **Iced** with its `wgpu` renderer for the GPU-rendered macOS UI.
-3. Use a simpler version of the visual structure in `references/ui.png` and
-   `references/ui_2.png`.
-4. Show two distinct sections in the left sidebar: **Servers** and **Agents**.
-5. Let users create, rename, reorder, and delete groups in either section, such as `Production`,
-   `Staging`, or `Local agents`.
-6. Let users split a group into subgroups (categories) such as `Grafana`, `Databases`, or
-   `Relays`. Launchers always live in a subgroup, never directly in a group.
-7. **Servers** drill down one level at a time: the section shows its groups, the selected group
-   reveals its subgroups, and the selected subgroup reveals its launcher tiles. Deselecting a level
-   hides everything below it.
-8. **Agents** are one flat list. There is no group and no category on screen: the section shows its
-   launchers and an "Add agent" card. The containers still exist in the config — a launcher always
-   lives in a subgroup — but they are resolved for the user rather than navigated by them, and
-   adding an agent creates the container if the config has none.
-9. Let users create, edit, move, reorder, duplicate, and delete tiles.
+3. Look like `references/ui.png`'s successor, `references/facelift.png`: an `AppKit`-style panel
+   with a header (title, search, pin), a source-list sidebar, a list pane with a segmented control,
+   and a footer bar. `facelift.md` records how each part of that screenshot maps onto Despatch.
+4. Show the server **Groups** in the sidebar, and at its foot **Recently used** and **Settings**.
+   Despatch is SSH only: there are no agent or custom-command launchers in the interface.
+5. Let users create, rename, and delete server groups, such as `Production` or `Staging`.
+6. Let users split a group into subgroups (categories) such as `Web`, `Workers`, or
+   `Bastions`. Launchers always live in a subgroup, never directly in a group.
+7. A selected **group** fills the pane: a segmented control offers **All** and each of its
+   categories, and the pane lists the launchers of the chosen segment as rows. Selecting a group is
+   choosing a destination, not a toggle — selecting it again keeps it open.
+8. A config written by an earlier version may hold an `agents` section with agent and custom
+   launchers. It still opens: those groups are kept in the file untouched and never shown,
+   searched, or listed in Recently used. Nothing new is ever added to them, and nothing seeds them.
+9. Let users create, edit, move, reorder, duplicate, and delete launchers.
 10. Launch an SSH connection in the user's system-associated terminal when a server tile is
    activated.
-11. Launch supported agent CLIs in the user's system-associated terminal. Initial presets are
-    Codex, Claude, Gemini, and OpenCode.
-12. Support custom CLI launchers in addition to the built-in agent presets.
+11. (Removed: agent CLI launchers.)
+12. (Removed: custom CLI launchers.)
 13. Persist all groups and launchers in a human-readable, versioned JSON config file.
 14. Let the user select where that config file lives so it can be placed in a shared, synced, or
     version-controlled folder.
-15. Keep machine-local preferences, such as the selected config path and window state, outside the
-    shared config.
+15. Keep machine-local state — the selected config path, the appearance, the terminal picked for
+    launches, and the launch history behind "Recently used" — outside the shared config.
 16. Never store passwords, API tokens, SSH private-key contents, or other secrets in the shared
     config.
 
@@ -50,119 +50,102 @@ Changing either is a product decision and should not happen silently.
 
 ## Design direction
 
-Read both reference images before changing the main layout.
+The design reference is `references/facelift.png` (local only: `references/` is git-ignored). Read
+it, and `facelift.md`, before changing the panel's layout.
 
-Design read: a focused developer utility with a calm, native macOS language. It should inherit the
-references' sidebar, group list, and connection tiles without inheriting their dense toolbar,
-vault, collaboration, port-forwarding, or credential-management features.
+Design read: a focused developer utility in the native macOS language of a menu-bar extra — an
+`AppKit` popover's proportions, controls, and type, drawn by Iced.
 
 Design settings:
 
-- Design variance: 4/10
-- Motion intensity: 3/10
-- Visual density: 7/10 — compact everywhere the app spends space on itself, generous only in hit
-  targets. Every launcher card on screen shares one width: the width the longest label among them
-  needs, so no host is ever cut short, bounded only by the panel itself. Nothing else stretches —
-  the sidebar is an icon rail one symbol wide, cards and chips are sized to their content
-  rather than to a comfortable grid, and editor fields and buttons use the smaller of the two
-  native control sizes; rail cells stay large because they are pressed, not read.
-- Typography: Lilex, bundled with the binary rather than taken from the system, so the interface is
-  identical on every machine. It is monospaced, and the whole layout depends on that: every
-  content-sized control is measured through `presenters::text_width`, which multiplies the
-  character count by one advance (`ADVANCE`, 0.6 em). Replacing the font means measuring the new
-  one and updating that constant, or every card and chip is laid out to the wrong width. All three
-  weights ship (Regular, Medium, SemiBold) and all three are registered in `run`; a weight with no
-  face behind it is synthesized by the shaper and reads as a smeared Regular. The files share one
-  typographic family, so the weight — not the family name — selects the face. Three tests in
-  `typography` hold the files, their family name, their weights, and their shared advance together.
+- Design variance: 3/10
+- Motion intensity: 2/10
+- Visual density: 7/10 — a fixed 720 × 520 panel. Rows fill the pane's width; only the segmented
+  control's segments are measured, to decide how many fit before the rest go into a "More" menu.
+- Typography: San Francisco, the system font, selected by its font-database family name
+  `"System Font"` (`/System/Library/Fonts/SFNS.ttf`). It is one variable font; the Medium and
+  Semibold weights are positions on its weight axis, which the shaper applies. It is proportional,
+  so `presenters::ADVANCE` is an *estimate* used only to decide where an ellipsis goes; a test in
+  `typography` checks the estimate is never narrower than typical labels set in the installed font.
 - App icon: `apps/despatch/resources/icon.png` is the single source, a 1024pt canvas holding the
   824pt artwork on Apple's macOS icon grid with transparent corners. `bundle-app.sh` derives every
   rendition from it with `sips` and `iconutil`, so no size can go stale on its own, and no `.icns`
-  is committed. The icon and the app name come from the surrounding bundle, so a bare
-  `cargo run` shows neither; `make run` builds the bundle and launches the binary from inside it.
-- Theme: two colors, `#03191E` (ink) and `#F2F5EA` (parchment), whose roles swap with the
-  appearance. Dark paints ink and marks in parchment; light paints parchment and marks in ink. The
-  system accent is not used — an arbitrary accent on this pair reads as an unrelated third color.
-  The appearance follows the system by default and can be pinned to light or dark in Settings; that
-  choice is a machine-local preference, never part of the shared config.
-- The content column is the palette's ground, flat. It carries no gradient and no lift: it is the
-  largest surface in the window, so anything mixed into it is read as the app's color rather than
-  as depth, and a wash toward white turns the ground grey next to the true dark of the rail. Dark
-  surfaces that do lift are lifted toward parchment, never toward white, for the same reason.
-- Accent: one restrained accent color, and never assume it is dark — a symbol sitting on an
-  accent-filled control uses the legible-on-accent tint, not white
-- Shape system: 10-12 pt surfaces, 7-8 pt fields and buttons, round icon backplates
-- Icons: SF Symbols exported as reviewed assets, with descriptive labels and no hand-drawn
-  substitutes
+  is committed. The menu bar shows an SF Symbol template image (`terminal`), never the app icon:
+  menu-bar images must be monochrome templates the menu bar tints itself.
+- Theme: `AppKit`-like semantic tokens in `theme.rs` — a light grey chrome ground, a brighter list
+  pane, label/secondary/tertiary text, hairline separators — with light and dark values. The accent
+  is the user's **system accent color**, read through `system_appearance()`. The appearance follows
+  the system by default and can be pinned to light or dark in Settings; that choice is a
+  machine-local preference, never part of the shared config.
+- **Dark-mode hairlines and tracks are opaque grays, not translucent white.** The renderer blends
+  in linear light, where a 10% white overlay comes out several times brighter than it does in
+  `AppKit`, and every separator reads as a bright rule.
+- Shape system: a 12 pt panel, 7–8 pt fields, buttons, segments and icon tiles, 6 pt source-list
+  rows.
+- Icons: SF Symbols rasterized once on a 64-point canvas and tinted per role, plus the bundled
+  provider marks. No hand-drawn substitutes.
 
 Required layout:
 
-The sidebar is an icon rail: one SF Symbol per destination, centered in a cell tall enough to aim
-at without looking, and no text at all. Every name — including the config file name and keyboard
-equivalents — lives in a tooltip, because a caption is what would force the rail wider. The open
-destination is a large accent-filled rounded square.
-
-Two rules the rail must keep:
-
-- **Every cell runs in one sequence and fills its share of the height.** Nothing is pushed to the
-  bottom edge with a filling spacer, and nothing is given a fixed height that leaves the remainder
-  as dead space under the last cell: a taller window makes the cells taller. The divider is the
-  only fixed measurement in the rail. The utilities follow the destinations after it.
-- **The symbol is sized by its cell, not by a constant.** It fills the cell short of a few points
-  of inset and stays square, so it grows with the rail rather than sitting as a small mark in a
-  large target. This is why symbols are rasterized on a canvas sized for the rail: a mask cut for a
-  20-point toolbar icon turns to mush when a rail cell stretches, and there is no sharper copy to
-  fall back to.
-- **The rail is never narrower than the traffic lights.** They float over the content view at a
-  position macOS chooses, reaching about 68 points from the window's left edge, and a narrower rail
-  leaves the green button hanging over the content while its neighbours sit on the rail. Measure
-  before shrinking it.
-
 ```text
-+------+-----------------------------------------------------------------+
-| [::] | Servers                  [search]          + Add server group    |
-| [**] |                                                                  |
-| ---- | Groups                                                           |
-| [::] |  [ Production ]  [ Staging ]  [ Add server group ]               |
-| [::] |                                                                  |
-|      | Production                                   + Add category      |
-|      |  [ Grafana ]  [ Databases ]  [ Add category ]                    |
-|      |                                                                  |
-|      | Databases                                    + Add server        |
-|      |  [ Primary ]  [ Replica ]  [ Add server ]                        |
-|      |                                                                  |
-+------+-----------------------------------------------------------------+
+┌────────────────────────────────────────────────────────────────────┐
+│ ▣ Despatch      [🔍 Search servers                       ⌘F]   📌 │
+├──────────────────┬─────────────────────────────────────────────────┤
+│ Groups        +  │ Production                     2 servers in Web ✎🗑│
+│ ▓ Production   6 │ ┌ All ┬▓Web▓┬ Workers ┬ Bastions ┬ More ▾ ┬ + ┐    │
+│   Staging      2 │ [▣] API server                                  │
+│   Home lab     3 │     deploy@api.example.com                      │
+│                  │ ─────────────────────────────────────────────── │
+│                  │ [▣] Frontend                                    │
+│                  │     deploy@web.example.com                      │
+│                  │                                                 │
+│ ◷ Recently used  │                                                 │
+│ ⚙ Settings       │                                                 │
+├──────────────────┴─────────────────────────────────────────────────┤
+│ + New server                       Double-click or press Return …  │
+└────────────────────────────────────────────────────────────────────┘
 ```
+
+- **Header**: the app's glyph and name over the sidebar's width; the search field starts where the
+  pane does; the pin at the right keeps the panel open.
+- **Sidebar**: a source list. The selected row is filled with the accent; others wash faintly on
+  hover. A group's row trades its count for Rename and Delete while hovered. Where the config
+  lives is shown and revealed from Settings, not from the sidebar.
+- **Pane**: a heading with the destination's name and what it holds; for a group, the segmented
+  control; then the rows. A search reaches across every group and tags each row with where it
+  lives. Settings is a destination in the pane, not a sheet.
+- **Footer**: the add action that fits the destination ("New server", "New category", "New
+  group"), and on the right a hint — or the status line when there is news. Settings is not in the
+  footer: it is at the foot of the sidebar.
 
 Interaction requirements:
 
-- A tile responds immediately on pointer-down and launches on activation.
-- Hover actions live in a `stack` layer above a card, and the pointer tracker must wrap that whole
+- A row responds immediately on pointer-down: one click selects, a double click or Return launches.
+- Hover actions live in a `stack` layer above a row, and the pointer tracker must wrap that whole
   stack. `stack` levitates the cursor for the layers under whichever one reports a mouse
   interaction, so a tracker placed *under* the actions is told the pointer left the instant they
-  appear, and the card flickers instead of letting the actions be pressed.
-- A label color tints a control rather than flooding it: a wash of the color, a border in the same
-  color, and the ordinary label color for the text. Only fixed backplates, such as a card badge,
-  take the color at full strength. Chips wash with alpha; cards mix the color into their surface so
-  they stay opaque above the content gradient.
+  appear, and the row flickers instead of letting the actions be pressed.
+- A label color tints a control rather than flooding it: a row's icon tile takes a wash and a border
+  in the color, and the symbol is drawn in it; text keeps the ordinary label color.
 - Color cascades down one path and is set in two places. A **group** carries a label color. Its
-  **categories** have none of their own and are always drawn in the group's, so an open group reads
-  as one block. A **launcher** is drawn in its group's color too, but may be given its own in the
-  launcher editor, which then wins. Clearing a launcher's color returns it to the group. Do not add
-  a color of its own to a category: it would be a setting that could never take effect.
-- A status banner that reports an *event* — a launch result, a failed action — clears itself after
-  ten seconds. A banner that reports a *state*, such as a conflicted or unsaved config, stays as
-  long as the condition holds: hiding it would be lying about the file. Dismissals carry the token
-  of the banner they were started for, so one that lands after its banner was replaced is ignored.
+  **categories** have none of their own. A **launcher** is drawn in its group's color too, but may be
+  given its own in the launcher editor, which then wins. Clearing a launcher's color returns it to
+  the group. Do not add a color of its own to a category: it would be a setting that could never
+  take effect.
+- A status line that reports an *event* — a launch result, a failed action — clears itself after
+  ten seconds. One that reports a *state*, such as a conflicted or unsaved config, stays as long as
+  the condition holds: hiding it would be lying about the file. Dismissals carry the token of the
+  line they were started for, so one that lands after its line was replaced is ignored.
 - Selection, hover, focus, disabled, empty, loading, success, and error states must all exist.
-- Sheets and popovers must originate from the control that opened them and dismiss along the same
-  spatial path.
+- Sheets open above the panel behind a scrim that follows the panel's rounded corners.
 - Motion is limited to useful state feedback and must respect reduced-motion preferences.
-- Translucency is reserved for structural chrome such as the sidebar or toolbar. Content tiles use
-  solid semantic surfaces for readability.
+- The list pane and rows are solid semantic surfaces for readability.
 - Keyboard navigation and VoiceOver labels are required, not optional polish.
-- Common shortcuts: Command-N adds an item, Command-Shift-N adds a group, Command-F focuses search,
-  Command-comma opens settings, Return launches the selected tile, and Delete requests deletion.
+- Shortcuts: Command-N adds an item, Command-Shift-N adds a group, Command-F focuses search,
+  Command-comma opens Settings, Command-1…9 jumps to a group, ←/→ change the segment, ↑/↓ move
+  through the rows, Return launches the selection (or the first search result), Delete requests
+  deletion, Escape closes a sheet, then a search, then the panel, Command-W hides the panel, and
+  Command-Q quits. Keys a focused text field uses — Delete, Return, ←/→ — stay with the field.
 
 Do not add generic web-dashboard patterns, purple glows, decorative gradients, fake status dots,
 custom-drawn icons, or perpetual animation.
@@ -447,7 +430,7 @@ Example shape:
       "subgroups": [
         {
           "id": "018f46f3-0000-7000-8000-00000000a001",
-          "name": "Databases",
+          "name": "Web",
           "items": [
             {
               "type": "ssh",
@@ -493,10 +476,16 @@ Example shape:
 Persistence requirements:
 
 - Default file: `~/Library/Application Support/Despatch/config.json`.
-- Store only the chosen config path, the appearance choice, and local window/sidebar preferences in
+- Store only the chosen config path, the appearance choice, and the picked terminal in
   `NSUserDefaults` via the isolated macOS preferences adapter. `NSUserDefaults` only exposes safe
   setters for numbers and URLs, so anything else would need an `unsafe` block: store enumerations
   as their stable integer code rather than reaching for one.
+- The launch history behind "Recently used" is machine-local and is **not** a preference: it is a
+  list, which `NSUserDefaults` cannot hold safely. It lives in
+  `~/Library/Application Support/Despatch/recents.json` (beside the *default* config, even when the
+  config itself has moved to a shared folder), written atomically by `JsonRecentLaunches` behind
+  the `RecentLaunches` port. A missing, damaged, or future-format history reads as empty and never
+  stops the app; a history that cannot be written never fails the launch it records.
 - Let users create a config, open an existing config, switch config, reveal it in Finder, reload it,
   and save a copy.
 - Write to a sibling temporary file, flush and sync it, then atomically rename it over the target.
@@ -632,8 +621,12 @@ Rules:
 - When the user has chosen nothing, fall back to the plain system association.
 - Invoke `/usr/bin/open` with the script path as a process argument, or use the equivalent
   `NSWorkspace` API behind the macOS adapter. Never build an `open` command through a shell.
-- Provide a future-compatible preference for an explicit terminal override, but default to the
-  system association.
+- Settings → "Launches open in" picks the terminal: **System default** (the association above,
+  named when it names one) or any installed terminal from `KNOWN_TERMINALS` in
+  `default_terminal.rs` — Terminal, iTerm2, Ghostty, WezTerm, kitty, Alacritty, Warp — each of
+  which has a reviewed launch path. The pick wins over the association, takes effect at once, and
+  is stored as that list's stable integer code (the codes never change). Installed terminals are
+  found through `NSWorkspace` when Settings opens, never on every frame.
 - Render argv using one audited POSIX-shell quoting function. Do not concatenate untrusted values.
 - SSH command order should be deterministic: executable, identity, port, extra args, destination.
 - Agent presets initially resolve to `codex`, `claude`, `gemini`, and `opencode`, with an editable
@@ -693,76 +686,112 @@ meaning from strings.
 ### App shell
 
 - Initialize the dependency graph before starting Iced's main-thread event loop.
-- Use a native winit-backed window with a sensible default size near 1120 x 720 and a minimum near
-  840 x 560.
-- Build the sidebar and content region as a resizable two-column Iced layout whose divider and
-  width constraints follow macOS conventions.
-- Use a native macOS app menu with About, Settings, File, Edit, View, Window, and Help behaviors
-  where Iced/winit supports it; isolate any required platform bridge.
-- Retain the root component and every Rust callback/model owner for at least as long as the window
+- Despatch is an Iced **daemon**: it opens one window at start and keeps running with no window on
+  screen. `LSUIElement` in `Info.plist` keeps it out of the Dock and gives it no menu bar of its
+  own; a binary started outside the bundle (`cargo run`) is made an accessory app through the
+  platform bridge instead.
+- **The panel window** is borderless, transparent outside the panel's 12 pt corners, floating
+  (`Level::AlwaysOnTop`), not resizable, 720 × 520, and opened hidden. The iced style paints no
+  window background, so those corners really are transparent. The platform bridge
+  (`panel_window.rs`) joins it to every Space and lets it float over full-screen apps, gives it the
+  system shadow, and recomputes that shadow once the first frame is on screen.
+- **Showing and hiding go through the bridge**, not `window::open`/`close`: iced 0.14 has no
+  visibility task, and keeping one window for the life of the app keeps the scroll position, the
+  search, and any open sheet. Showing activates the app (an accessory app is not active while its
+  panel is hidden) and focuses the search field; hiding with Escape or the item also hides the app,
+  so the keyboard returns to the app the user came from.
+- **The status item** (`status_item.rs` in both the platform and UI crates) is an `NSStatusItem`
+  with a template SF Symbol. A left click toggles the panel; a right or Control click opens a native
+  menu — Open Despatch, Settings…, Reveal Config in Finder, Quit Despatch. Its target object also
+  observes `NSApplicationDidResignActiveNotification`. Events reach Iced through a channel turned
+  into a subscription; no Objective-C type leaves the platform crate.
+- **The item is laid out after it is created.** Its window reports an empty frame at the origin
+  until the menu bar has placed it, so the panel never hangs from an unplaced item: the first show
+  at launch waits a moment, and an anchor without a placed item falls back to the right end of the
+  menu bar. `panel_top_left` centers the panel on the item, clamps it to the item's screen, and
+  hangs it 6 pt below the menu bar.
+- **Dismissal**: the item toggles; Escape closes a sheet, then a search, then the panel; another app
+  becoming active (a click anywhere outside) hides it; a successful launch hides it. A **pinned**
+  panel survives the last two. The pin is per run, never stored. File panels opened from the panel
+  are modal to Despatch, so they do not deactivate it and do not hide the panel.
+- Without a Dock icon or app menu, **Quit** lives in Command-Q, in Settings, and in the item's
+  menu.
+- **Open at login** is a Settings switch over `SMAppService.mainApp`, reached through the
+  Objective-C runtime (`login_item.rs`). It only works from the app bundle; outside one the switch
+  is disabled and says so, and a registration waiting for approval says where to approve it.
+- **Motion**: the panel fades in over 120 ms on `NSWindow`'s animator, and simply appears when the
+  system asks to reduce motion. Hiding is immediate.
+- **Increase Contrast** selects a separate theme (the setting travels in the theme's name, since an
+  Iced theme carries nothing else): stronger hairlines and secondary text, stronger pill
+  outlines, and an outlined selected row.
+- The panel opens once at launch, so starting the app visibly does something.
+- Retain the root component and every Rust callback/model owner for at least as long as the panel
   displays them. All UI state transitions stay on the Iced event-loop thread.
 
 ### Sidebar
 
-- A destination list, not a tree: one row per section, Servers and Agents. The row itself is the
-  hit target and switching rows swaps the whole main panel.
-- Settings/config status stays at the bottom and is visually separate from navigation.
+- A source list. **Groups**: one row per server group, with its label color on its symbol and its
+  launcher count; hovering a row swaps the count for Rename and Delete; a `+` beside the heading
+  adds a group. There is no "Library" heading.
+- At the foot of the sidebar, below the groups however many scroll above them: **Recently used**
+  (count once there is history) and **Settings**. Where the config lives is in Settings, and an
+  unsaved or conflicted file is said in words in the footer's status line.
+- A row centers its symbol and label vertically. A `button` lays its content out from the top, so
+  a fixed-height row wraps its content in a container that centers it.
+- Selecting a row is choosing a destination. Selecting the open group again keeps it open. Returning
+  to a group returns to the segment it was left on (per run).
+- A group row is pressed, not clicked: the press opens the group, and the same press can carry it
+  up or down the list (through `drag_layer`) to take another group's place, which is outlined while
+  it would receive it.
+- **Hover exits name what they leave.** Moving up or left, the widget entered is told before the one
+  left, so an exit clears the hover only if it still belongs to the widget leaving. An
+  unconditional "hover: none" on exit wiped out the target of every upward or leftward drag.
+- Right-clicking a launcher row, a group row, or a category segment opens a native `NSMenu`
+  (`context_menu.rs`) with the same actions its buttons offer.
 
 ### Main content
 
-- Header: section name, its group and launcher counts, search, and one Add action.
-- The panel drills down in place: a `Groups` card grid, then the open group's categories, then the
-  open category's launcher tiles. A level is drawn only while its parent is selected, and pressing
-  an open card closes it again.
-- Card grids adapt between one, two, and three columns based on available width.
-- Tiles show a system icon, name, concise destination/command detail, and optional tags only when
-  tags convey actual data.
-- One click on a launcher card selects it, two launch it, and Return launches the selection. A
-  single click never launches: launching opens a terminal and takes the focus, which is too much to
-  hang on the same gesture that merely picks something out of a list. An overflow/context menu
-  exposes Edit, Duplicate, Move, and Delete.
-- A launcher card is a `mouse_area` around a container, not a `button`. Three gestures start with
-  the same press — select, launch, drag — and a `button` settles that press itself: it captures it,
-  then publishes on release, and only if the release lands back inside its bounds. That last rule
-  is why clicks used to be missed; a hand that drifted a few points between press and release
-  launched nothing at all.
-- A launcher moves between categories by holding the mouse down on its card and dragging it onto a
-  category chip. Past a small threshold the card lifts and follows the pointer as a floating copy;
-  below that threshold the gesture is an ordinary click. While a card is held, every category
-  except the one it already lives in offers itself as a target, the one under the pointer is
-  filled, and the card's own hover actions stand down. Releasing anywhere else abandons the gesture
-  and changes nothing, the pointer leaving the window or the window losing focus abandons it too,
-  and a dropped launcher lands at the end of the category it was dropped on. A drop moves one
-  launcher: there is no multi-selection to drag.
-- The card reports its own press, so the launcher being carried is the one under the pointer by
-  construction. The release comes from the event stream through a subscription, which no widget's
-  capture can hide, and which is only listened to while a card is actually held. Do not infer the
-  pressed card from the last reported hover: a hover goes stale whenever the list redraws under a
-  still pointer, and a stale one starts a drag on a card nobody touched.
-- **The floating card follows the pointer without messages.** It is a widget of its own,
-  `drag_layer`, which keeps the pointer position in its own state, asks for a redraw when it moves,
-  and draws the card translated to where the pointer now is. A message is not a cheap thing here:
-  every one rebuilds the view and lays the whole window out again, and a pointer reports movement
-  many times a second, so a card that followed the pointer through messages fell behind the cursor
-  it was supposed to be stuck to. The layer publishes exactly one message per gesture — the moment
-  the press travels past its threshold and becomes a drag, which is a real change in what the
-  interface shows. Any future "follow the pointer" behaviour belongs in a widget for the same
-  reason.
-- **The window is always the same two layers**, a base and an overlay, even when the overlay has
-  nothing to show. Widget state — every scroll position among it — lives in a tree iced reconciles
-  against the view, and a tree whose root changes type is rebuilt from nothing rather than
-  reconciled. A window that were a plain container at rest and a `stack` while something floated
-  above it would throw away where the user had scrolled the moment they pressed a card.
-- Nothing reacts to a press until it becomes a drag. The categories offer themselves as targets, and
-  the cards put their hover actions away, only once the card has left its place; doing either on the
-  press itself makes an ordinary click flash the whole panel.
-- The layer reports no mouse interaction. `stack` hands the cursor to the layers under the topmost
-  one that claims one, so claiming it there would take the pointer away from the chips the card is
-  being carried to.
-- The add tile is visually quieter than real launchers and remains keyboard reachable.
+- Heading: the destination's name, and what it shows ("6 servers", "2 servers in Web"). With a
+  category open, that category's Rename and Delete follow the count.
+- **Category pills**, for a group: **All**, each category in config order, and `+` to add one.
+  Each pill is a separate capsule as wide as its name, outlined in a quiet gray; the selected one
+  is outlined in the accent over a faint wash of it, with its label in the accent. Categories that
+  do not fit go into a "More" pop-up at the end, so a pill never wraps or shortens a name. A group with no category shows an empty state
+  asking for one, because a launcher always lives in a category.
+- **Rows**: a 30 pt icon tile (the launcher's symbol or provider mark, tinted with its label color),
+  the name, the destination or command, and at the right a quiet tag: the category in "All", the
+  group and category in search results, how long ago in "Recently used". Hover or selection swaps
+  the tag for Edit, Duplicate, and Delete.
+- **Recently used** lists successful launches, newest first, at most 20, kept on this machine in
+  `recents.json` beside the default config (see persistence). Launchers that no longer exist are
+  not listed and are dropped on the next write.
+- **Search** reaches across every server group from any destination; Return opens the selected
+  result or the first one. Choosing a sidebar destination clears the search.
+- One click on a row selects it, two launch it, and Return launches the selection. A single click
+  never launches: launching opens a terminal and takes the focus, which is too much to hang on the
+  same gesture that merely picks something out of a list.
+- A row is a `mouse_area` around a container, not a `button`. Three gestures start with the same
+  press — select, launch, drag — and a `button` settles that press itself: it captures it, then
+  publishes on release, and only if the release lands back inside its bounds.
+- A launcher moves between categories by dragging its row onto a segment, or by choosing another
+  category in the launcher editor. Past a small threshold the row lifts and follows the pointer as
+  a floating copy; below it the gesture is an ordinary click. While a row is carried, every category
+  segment except the one it lives in (and never "All") offers itself as a target, the one under the
+  pointer is filled, and the row's hover actions stand down. Releasing anywhere else, the pointer
+  leaving the panel, the panel losing focus, or Escape abandons the gesture. A dropped launcher
+  lands at the end of the category; a list showing one category follows it there.
+- The row reports its own press, so the launcher being carried is the one under the pointer by
+  construction. The release comes from the event stream through a subscription that is only
+  listened to while a row is held. Do not infer the pressed row from the last reported hover.
+- **The floating row follows the pointer without messages.** It is drawn by `drag_layer`, which
+  keeps the pointer position in its own state and publishes exactly one message per gesture — the
+  moment the press becomes a drag. Any future "follow the pointer" behaviour belongs in a widget
+  for the same reason: every message rebuilds and lays out the whole panel.
+- **The panel is always the same two layers**, a base and an overlay, even when the overlay has
+  nothing to show, so widget state such as scroll positions survives a press.
+- The layer reports no mouse interaction, so the pointer still reaches the segments under it.
 - Large collections use measured virtualization behind an isolated custom widget when Iced's
-  standard `scrollable` would retain too many offscreen elements. Do not build every offscreen
-  tile in large collections.
+  standard `scrollable` would retain too many offscreen elements.
 
 ### Editors
 
@@ -782,39 +811,8 @@ meaning from strings.
   never blocks saving — a server that is switched off today is still worth writing down. Its
   verdict is stamped with the destination it ran against, so editing the host or port drops a stale
   result instead of showing it against the new address.
-- Agent editor: pick the provider, then optionally give it parameters. Everything a built-in
-  provider already knows — executable, working directory, environment — sits behind the
-  "Additional settings" disclosure, so adding an agent is choosing one and pressing Add.
-- The four built-in providers are present in an `Agents` group, because an empty Agents section
-  offers nothing but "create a group", which is not what someone opening the app came to do. A new
-  config is seeded with them; an existing config with no Agents section gains them **in memory when
-  it is opened**. They are ordinary launchers and can be edited or deleted like any other.
-- The backfill writes nothing. Opening a file is not an edit: rewriting someone's config the moment
-  they open it would bump its revision and race another machine editing the same shared file, which
-  is a poor trade for launchers that work either way. The next real edit persists them. Seeding
-  only at creation is not enough — it never reaches a config that already exists, which is every
-  config but the first.
-- Each provider is drawn with its own brand mark, bundled under `assets/logos/` in the
-  single-color form published by [Simple Icons](https://simpleicons.org) (CC0). The marks are
-  monochrome by design, which is what lets them go through the same coverage-mask tinting as a
-  system symbol. Each trademark belongs to its owner and is used only to name the tool a launcher
-  runs.
-- A bundled mark may arrive as ink on transparency or as ink flattened onto white, depending on
-  what rasterized it. Coverage is therefore alpha scaled by darkness, not alpha alone: a glyph
-  flattened onto white is fully opaque everywhere, and reading alpha by itself renders it as a
-  solid block.
-- The environment block is `NAME=value`, one per line, blank lines and `#` comments ignored, and
-  only the first `=` separates a name from its value so `FLAGS=--a=b` is one entry. Names are
-  validated as shell identifiers, because a name carrying `=` or a space does not become a
-  variable — it becomes another command. This is where a shell alias's variables go; see below.
-- Saving an agent or a custom launcher first resolves its executable the same way launching would.
-  A name that resolves to nothing is refused with the name in hand, because the alternative is
-  finding out when the tile is pressed. **A shell alias is not a program**: it lives in the user's
-  shell configuration and cannot be executed directly, so it fails this check. That is correct —
-  such a launcher would never have run — and the way to reproduce one is an absolute path plus the
-  environment the alias sets.
-- Custom CLI editor: name, working directory, structured executable + argv by default, with an
-  explicitly enabled advanced raw-shell mode.
+- There is no agent or custom-command editor. A launcher that is not SSH (from an older config) is
+  never shown, so it is never edited.
 - Labels are above fields; placeholder text is never the only label.
 - Validate inline before Save and preserve entered data when validation fails.
 - Destructive confirmation names the exact group or launcher and explains the impact.
@@ -966,14 +964,16 @@ Before release, verify on at least the oldest supported macOS and the current ma
 
 - Fresh install and empty state
 - Light mode, dark mode, Increase Contrast, Reduce Transparency, and Reduce Motion
-- Window at minimum, default, and full-screen sizes
-- One-, two-, and three-column tile layouts
+- The panel opening under the menu-bar item on every display, on a full-screen app's Space, and with
+  an auto-hiding menu bar; closing on a second click, on Escape, on a click elsewhere, and after a
+  launch; staying open while pinned; Quit from Command-Q, Settings, and the item's menu
+- A group with more categories than fit (the "More" segment) and one with none
 - Keyboard-only navigation and every declared shortcut
 - VoiceOver labels, roles, focus order, and editor error announcements
 - Add/edit/delete flows for server, each built-in agent, and custom CLI
-- One click selects a card without launching, two launch it, and a double click repeated on
+- One click selects a row without launching, two launch it, and a double click repeated on
   several cards in a row launches every time
-- Dragging a launcher onto another category, onto its own category, and onto nothing at all
+- Dragging a launcher onto another category segment, onto its own, onto "All", and onto nothing
 - SSH launch through Terminal.app and at least one alternative terminal registered for `.command`
 - Missing SSH key, missing CLI executable, invalid config, read-only config, and external-edit
   conflict
@@ -1033,10 +1033,44 @@ unfocused window is never asked to redraw, so only the first frame can be captur
 `capture_scene` rather than trying to drive the app after launch. The feature is off by default and
 must never be enabled in a release build.
 
-The scenes are `add-server`, `add-server-advanced`, `add-agent`, `agents`, `groups`, `rename-group`,
-`rename-category`, `delete`, `drag`, `hover`, and `settings`. The `drag` scene shows what a held card
-does to the categories — the drop targets offering themselves, the one under the pointer filled — but
-not the floating card itself, which is drawn from real pointer events that a scene cannot produce.
+A capture run shows the panel window centered on screen instead of under the menu-bar item, and
+installs no item. Window corners outside the panel are transparent on screen but come out black in
+the BMP, which has no alpha.
+
+**The live self-test** checks the real menu-bar behaviour the same way, without Accessibility or
+Screen Recording permission:
+
+```bash
+DESPATCH_LIVE_TEST=/tmp/live cargo run -p despatch --features capture
+```
+
+It installs the status item and presses it through `AppKit` (`performClick`, the path a real click
+takes to the item's target); posts pointer and key events to the app's own queue, which winit reads
+as real input, to click segments, drag a row onto a segment and a group up the sidebar, open the
+editor with Command-N and type into it, and double-click a launcher; answers a native context
+menu from the keyboard; turns Open at login on and off; reads back the accessibility tree, checks
+every pressable element's frame on screen, and presses elements through
+`accessibilityPerformPress` the way VoiceOver does; samples
+the window's opacity during the fade; and photographs the composited panel and measures its
+corners and shadow. Every check prints `live: PASS …` or `live: FAIL …`.
+
+A process may message its own controls, post events to itself, and capture its own windows
+without Accessibility or Screen Recording permission, which is why this works where synthetic
+system events and `screencapture` do not. The script expects a purpose-made config (three server
+groups, Production holding Web with two servers, Workers with one, and an empty Bastions; Staging
+opening with a server whose only effect is a local `ProxyCommand` that touches a marker file; and an
+agents group left over from an older version, which must stay hidden) under a throwaway `HOME`, and is run from a copy of the
+bundle with its own bundle identifier so it never shares preferences with the real app. Never run
+it against the user's config: it moves launchers and groups. `DESPATCH_LIVE_TERMINAL=<bundle id>`
+launches through that terminal instead of the user's (Terminal.app needs no Automation permission),
+`DESPATCH_LIVE_REDUCE_MOTION=1` and `DESPATCH_CAPTURE_CONTRAST=increased` force those settings, and
+`views::probe` holds the panel coordinates the pointer events aim at.
+
+The scenes are `all`, `category`, `add-server`, `add-server-all`, `add-server-advanced`,
+`reachability`, `recent`, `settings`, `search`, `rename-group`,
+`rename-category`, `delete`, `drag`, `hover`, and `pinned`. The `drag` scene shows what a held row
+does to the segments — the drop targets offering themselves, the one under the pointer filled — but
+not the floating row itself, which is drawn from real pointer events that a scene cannot produce.
 Its behaviour is covered by the `drag_layer` tests instead, which drive a headless interface with
 `iced_test` and compare drawn frames. A capture runs against the config the app
 would really open, so reviewing something the current config does not contain — label colors, for
@@ -1109,7 +1143,8 @@ Exit criteria:
 
 Exit criteria:
 
-- Sidebar visibly contains Servers and Agents sections.
+- The sidebar visibly contains the server groups, and Recently used and Settings at its foot
+  destinations.
 - Groups can be selected with pointer and keyboard.
 - Layout matches the reference structure at minimum and default window sizes.
 
@@ -1124,7 +1159,6 @@ Exit criteria:
 
 - A user can create a Production group, add several SSH tiles, relaunch the app, and launch each
   connection in the associated terminal.
-- A user can create Codex, Claude, Gemini, and OpenCode tiles and launch each.
 - Config location can be moved to a shareable path and reopened.
 
 ### Phase 6 - sharing, polish, and resilience
@@ -1156,23 +1190,24 @@ Exit criteria:
 The project is not complete until authoritative evidence proves every item below:
 
 - Native Rust + Iced app launches as a GPU-rendered macOS `.app`.
-- Left sidebar has separate Servers and Agents sections.
+- Despatch runs from the menu bar with no Dock icon, and its panel follows
+  `references/facelift.png`.
+- The sidebar lists the server groups, and Recently used and Settings at its foot.
 - Both sections support persistent user-created groups.
 - Selected group shows persistent tiles.
 - SSH tiles launch the correct structured SSH command in the system-associated terminal.
-- Codex, Claude, Gemini, and OpenCode tiles launch their respective CLIs.
-- Custom structured CLI launchers work; raw-shell launchers are explicit and warned.
 - Config survives relaunch and can be placed at a user-selected shared path.
 - Shared JSON is versioned, readable, contains no secrets, and handles conflicts without silent
   overwrite.
 - Light/dark mode, keyboard use, reduced motion/transparency, high contrast, and VoiceOver are
   verified.
 - Format, Clippy, tests, release build, app bundle verification, and manual launch checks pass.
-- The final UI has been visually inspected against both reference images at multiple window sizes.
+- The final UI has been visually inspected against `references/facelift.png` in light and dark mode.
 
 ## Working rules for future agents
 
-1. Read this file and both reference images before changing architecture or the main UI.
+1. Read this file, `facelift.md`, and `references/facelift.png` before changing architecture or the
+   panel's layout.
 2. Keep the current phase and acceptance criteria visible in the active task plan.
 3. Do not mark the product complete based on unit tests alone; verify the bundled app and real
    terminal behavior.

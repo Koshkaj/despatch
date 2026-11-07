@@ -1,7 +1,9 @@
 use std::fs;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
-use despatch_application::{LaunchRequest, PortError, PortErrorKind, TerminalLauncher};
+use despatch_application::{
+    LaunchRequest, PortError, PortErrorKind, TerminalLauncher, TerminalOption,
+};
 
 use crate::script_file;
 use crate::shell_script;
@@ -32,6 +34,46 @@ const ARGV_TERMINALS: [&str; 5] = [
 ];
 
 const GHOSTTY_BUNDLE_ID: &str = "com.mitchellh.ghostty";
+
+/// The terminals that can be picked in Settings: bundle identifier, display name, and the code the
+/// pick is stored as. The codes are written into the user's preferences, so they never change.
+///
+/// Every one of them has a reviewed launch path: Ghostty its scripting API, the argv terminals
+/// their `-e`, and Terminal.app and iTerm2 a staged `.command` file, which both run.
+const KNOWN_TERMINALS: [(&str, &str, i64); 7] = [
+    ("com.apple.Terminal", "Terminal", 1),
+    ("com.googlecode.iterm2", "iTerm2", 2),
+    (GHOSTTY_BUNDLE_ID, "Ghostty", 3),
+    ("com.github.wez.wezterm", "WezTerm", 4),
+    ("net.kovidgoyal.kitty", "kitty", 5),
+    ("org.alacritty", "Alacritty", 6),
+    ("dev.warp.Warp-Stable", "Warp", 7),
+];
+
+/// The stored code of a terminal that can be picked, by bundle identifier.
+#[must_use]
+pub fn terminal_code(bundle_id: &str) -> Option<i64> {
+    KNOWN_TERMINALS
+        .iter()
+        .find(|(id, _, _)| *id == bundle_id)
+        .map(|(_, _, code)| *code)
+}
+
+/// The bundle identifier a stored code stands for.
+#[must_use]
+pub fn terminal_for_code(code: i64) -> Option<&'static str> {
+    KNOWN_TERMINALS
+        .iter()
+        .find(|(_, _, known)| *known == code)
+        .map(|(id, _, _)| *id)
+}
+
+/// Whether Launch Services knows an application with this bundle identifier.
+fn is_installed(bundle_id: &str) -> bool {
+    objc2_app_kit::NSWorkspace::sharedWorkspace()
+        .URLForApplicationWithBundleIdentifier(&objc2_foundation::NSString::from_str(bundle_id))
+        .is_some()
+}
 
 /// What a terminal can be asked to do for itself, rather than through a shell wrapped around the
 /// launcher's command.
@@ -127,7 +169,11 @@ pub struct MacOsTerminalLauncher {
     resolver: RequestResolver,
     invoker: Arc<dyn OpenInvoker>,
     ghostty_invoker: Arc<dyn ghostty::GhosttyInvoker>,
-    terminal: TerminalChoice,
+    /// Where launches go when nothing has been picked in Settings.
+    association: TerminalChoice,
+    /// The terminal picked in Settings, which wins over the association. Shared, because the
+    /// launcher is cloned and a pick must reach every copy.
+    picked: Arc<Mutex<Option<String>>>,
 }
 
 impl Default for MacOsTerminalLauncher {
@@ -136,7 +182,8 @@ impl Default for MacOsTerminalLauncher {
             resolver: RequestResolver::default(),
             invoker: Arc::new(SystemOpenInvoker),
             ghostty_invoker: Arc::new(ghostty::SystemGhosttyInvoker),
-            terminal: TerminalChoice::detect(),
+            association: TerminalChoice::detect(),
+            picked: Arc::default(),
         }
     }
 }
@@ -152,14 +199,20 @@ impl MacOsTerminalLauncher {
             resolver,
             invoker,
             ghostty_invoker: Arc::new(ghostty::SystemGhosttyInvoker),
-            terminal,
+            association: terminal,
+            picked: Arc::default(),
         }
     }
 
-    /// The terminal this launcher will hand scripts to.
+    /// The terminal this launcher will hand scripts to: the one picked in Settings, or else the
+    /// system's default.
     #[must_use]
-    pub const fn terminal(&self) -> &TerminalChoice {
-        &self.terminal
+    pub fn terminal(&self) -> TerminalChoice {
+        self.picked
+            .lock()
+            .ok()
+            .and_then(|picked| picked.clone())
+            .map_or_else(|| self.association.clone(), TerminalChoice::Chosen)
     }
 
     /// Opens a new window of the terminal with the command on its own command line.
@@ -167,8 +220,12 @@ impl MacOsTerminalLauncher {
     /// Nothing is written to disk. The older path staged a `.command` file, which terminals run by
     /// appending `; exit` to a shell line — that is where "press any key to close the terminal"
     /// came from, and it is not something the file's own contents can prevent.
-    fn launch_with_arguments(&self, command: &ResolvedCommand) -> Result<(), PortError> {
-        let traits = self.terminal.traits();
+    fn launch_with_arguments(
+        &self,
+        terminal: &TerminalChoice,
+        command: &ResolvedCommand,
+    ) -> Result<(), PortError> {
+        let traits = terminal.traits();
         let mut application_arguments: Vec<String> = traits
             .leading
             .iter()
@@ -192,7 +249,7 @@ impl MacOsTerminalLauncher {
         let result = self.invoker.invoke(&OpenRequest {
             arguments: Vec::new(),
             reveal: false,
-            application_bundle_id: self.terminal.bundle_id().map(ToOwned::to_owned),
+            application_bundle_id: terminal.bundle_id().map(ToOwned::to_owned),
             application_arguments,
         })?;
         if result.success {
@@ -260,24 +317,48 @@ fn create_script(contents: &str) -> Result<std::path::PathBuf, PortError> {
 }
 
 impl TerminalLauncher for MacOsTerminalLauncher {
-    fn destination(&self) -> String {
-        self.terminal.describe()
+    fn available_terminals(&self) -> Vec<TerminalOption> {
+        KNOWN_TERMINALS
+            .iter()
+            .filter(|(bundle_id, _, _)| is_installed(bundle_id))
+            .map(|(bundle_id, name, _)| TerminalOption {
+                id: (*bundle_id).to_owned(),
+                name: (*name).to_owned(),
+            })
+            .collect()
+    }
+
+    fn default_terminal_name(&self) -> Option<String> {
+        self.association
+            .bundle_id()
+            .map(|_| self.association.describe())
+    }
+
+    fn chosen_terminal(&self) -> Option<String> {
+        self.picked.lock().ok().and_then(|picked| picked.clone())
+    }
+
+    fn choose_terminal(&self, id: Option<&str>) {
+        if let Ok(mut picked) = self.picked.lock() {
+            *picked = id.map(ToOwned::to_owned);
+        }
     }
 
     fn launch(&self, request: &LaunchRequest) -> Result<(), PortError> {
         let command = self.resolver.resolve(request).map_err(PortError::from)?;
-        if self.terminal.bundle_id() == Some(GHOSTTY_BUNDLE_ID) {
+        let terminal = self.terminal();
+        if terminal.bundle_id() == Some(GHOSTTY_BUNDLE_ID) {
             return self.launch_ghostty(&command);
         }
-        if self.terminal.accepts_command_arguments() {
-            return self.launch_with_arguments(&command);
+        if terminal.accepts_command_arguments() {
+            return self.launch_with_arguments(&terminal, &command);
         }
         let script = shell_script::render(&command);
         let path = create_script(&script)?;
         let result = self.invoker.invoke(&OpenRequest {
             arguments: vec![path.clone()],
             reveal: false,
-            application_bundle_id: self.terminal.bundle_id().map(ToOwned::to_owned),
+            application_bundle_id: terminal.bundle_id().map(ToOwned::to_owned),
             application_arguments: Vec::new(),
         });
         match result {
@@ -317,7 +398,10 @@ mod tests {
 
     use despatch_domain::PathTemplate;
 
-    use super::{MacOsTerminalLauncher, TerminalChoice, TerminalTraits};
+    use super::{
+        KNOWN_TERMINALS, MacOsTerminalLauncher, TerminalChoice, TerminalTraits, terminal_code,
+        terminal_for_code,
+    };
 
     fn launcher(invoker: Arc<dyn OpenInvoker>, terminal: TerminalChoice) -> MacOsTerminalLauncher {
         MacOsTerminalLauncher::new(
@@ -644,5 +728,43 @@ mod tests {
                 .expect("captured script path")
                 .clone()
         }
+    }
+
+    #[test]
+    fn a_picked_terminal_wins_over_the_association_until_it_is_cleared() {
+        let launcher = MacOsTerminalLauncher::new(
+            RequestResolver::default(),
+            Arc::new(FakeOpen::successful()),
+            TerminalChoice::Chosen("com.apple.Terminal".to_owned()),
+        );
+        let copy = launcher.clone();
+
+        launcher.choose_terminal(Some("com.mitchellh.ghostty"));
+        assert_eq!(
+            copy.terminal(),
+            TerminalChoice::Chosen("com.mitchellh.ghostty".to_owned()),
+            "a pick reaches every copy of the launcher"
+        );
+        assert_eq!(
+            copy.chosen_terminal().as_deref(),
+            Some("com.mitchellh.ghostty")
+        );
+
+        launcher.choose_terminal(None);
+        assert_eq!(
+            copy.terminal(),
+            TerminalChoice::Chosen("com.apple.Terminal".to_owned())
+        );
+        assert_eq!(copy.chosen_terminal(), None);
+    }
+
+    #[test]
+    fn every_pickable_terminal_has_its_own_stored_code() {
+        for (bundle_id, _, code) in KNOWN_TERMINALS {
+            assert_eq!(terminal_code(bundle_id), Some(code));
+            assert_eq!(terminal_for_code(code), Some(bundle_id));
+        }
+        assert_eq!(terminal_for_code(0), None, "zero is an unset preference");
+        assert_eq!(terminal_code("com.example.unknown"), None);
     }
 }

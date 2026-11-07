@@ -11,18 +11,18 @@ use objc2_foundation::{MainThreadMarker, NSPoint, NSRect, NSSize, NSString};
 
 /// The canvas every symbol is rasterized on.
 ///
-/// It is sized for the largest place a symbol is drawn — the icon rail, whose cells grow with the
-/// window — so that symbol is downscaled rather than blown up. A mask cut for a 20-point toolbar
-/// icon turns to mush at rail size, and there is no second, sharper copy to fall back to.
-const CANVAS_SIZE: usize = 128;
-const CANVAS_SIZE_F64: f64 = 128.0;
-const CANVAS_SIZE_ISIZE: isize = 128;
-const CANVAS_SIZE_U32: u32 = 128;
-const BYTES_PER_ROW_ISIZE: isize = 512;
-const SYMBOL_INSET: f64 = 8.0;
+/// It is sized for the largest place a symbol is drawn in the panel — about 30 points, on a 2×
+/// display — so every symbol is downscaled rather than blown up. Every symbol is kept in every
+/// tint the interface uses, so a larger canvas than needed costs memory for nothing.
+const CANVAS_SIZE: usize = 64;
+const CANVAS_SIZE_F64: f64 = 64.0;
+const CANVAS_SIZE_ISIZE: isize = 64;
+const CANVAS_SIZE_U32: u32 = 64;
+const BYTES_PER_ROW_ISIZE: isize = 256;
+const SYMBOL_INSET: f64 = 4.0;
 /// Every symbol is rendered at one point size, so glyphs share the optical weight and cap height
 /// SF Symbols are designed around instead of being stretched to fill the canvas individually.
-const SYMBOL_POINT_SIZE: f64 = 75.0;
+const SYMBOL_POINT_SIZE: f64 = 37.5;
 /// `NSFontWeightRegular`.
 const SYMBOL_WEIGHT: f64 = 0.0;
 

@@ -4,41 +4,12 @@
 )]
 
 use despatch_domain::LabelColor;
-use iced::widget::{button, container, rule, text, text_editor, text_input};
+use iced::widget::{
+    button, container, overlay, pick_list, rule, scrollable, text, text_editor, text_input,
+};
 use iced::{Background, Border, Color, Shadow, Theme, Vector, color};
 
 use crate::theme::{self, is_dark, label, label_secondary, label_tertiary, mix, with_alpha};
-
-/// The saturated backplate colors tiles use to tell launcher kinds apart at a glance.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum Accent {
-    Blue,
-    Indigo,
-    Teal,
-    Green,
-    Orange,
-    Gray,
-}
-
-impl Accent {
-    pub fn color(self, theme: &Theme) -> Color {
-        let dark = is_dark(theme);
-        match self {
-            Self::Blue if dark => color!(0x0A84FF),
-            Self::Blue => color!(0x007AFF),
-            Self::Indigo if dark => color!(0x5E5CE6),
-            Self::Indigo => color!(0x5856D6),
-            Self::Teal if dark => color!(0x40C8E0),
-            Self::Teal => color!(0x00A2C7),
-            Self::Green if dark => color!(0x30D158),
-            Self::Green => color!(0x28A745),
-            Self::Orange if dark => color!(0xFF9F0A),
-            Self::Orange => color!(0xE8790B),
-            Self::Gray if dark => color!(0x8E8E93),
-            Self::Gray => color!(0x6E6E73),
-        }
-    }
-}
 
 /// The user-chosen label color of a group or category, ready for the renderer.
 #[must_use]
@@ -125,37 +96,40 @@ pub fn disclosure(theme: &Theme, status: button::Status) -> button::Style {
 
 // ---------------------------------------------------------------- structural surfaces
 
-/// The window background behind the sidebar and the content column.
-pub fn window(theme: &Theme) -> container::Style {
+/// The panel itself: one rounded surface hanging from the menu bar.
+///
+/// The window around it is transparent, so these corners are the panel's real shape, and the system
+/// shadow is computed from them.
+pub fn panel(theme: &Theme) -> container::Style {
     container::Style {
         background: Some(Background::Color(theme.palette().background)),
+        text_color: Some(label(theme)),
+        border: Border {
+            radius: PANEL_RADIUS.into(),
+            width: 1.0,
+            color: if is_dark(theme) {
+                color!(0x4A4B50)
+            } else {
+                with_alpha(Color::BLACK, 0.12)
+            },
+        },
+        ..container::Style::default()
+    }
+}
+
+/// The corner radius of the panel, shared by everything that has to follow its outline.
+pub const PANEL_RADIUS: f32 = 12.0;
+
+/// The list pane: a solid content surface, a step off the chrome around it.
+pub fn pane(theme: &Theme) -> container::Style {
+    container::Style {
+        background: Some(Background::Color(theme::pane(theme))),
         text_color: Some(label(theme)),
         ..container::Style::default()
     }
 }
 
-/// The translucent sidebar chrome, separated from content by a hairline.
-pub fn sidebar(theme: &Theme) -> container::Style {
-    container::Style {
-        background: Some(Background::Color(theme::lowered(theme, 0.30, 0.045))),
-        border: Border::default(),
-        ..container::Style::default()
-    }
-}
-
-/// The content column: the palette's own ground, flat.
-///
-/// It carries no gradient and no lift. This is the largest surface in the window, so anything
-/// mixed into it is read as the app's color rather than as depth, and a wash toward white turned
-/// the ground grey next to the true dark of the rail.
-pub fn content(theme: &Theme) -> container::Style {
-    container::Style {
-        background: Some(Background::Color(theme.palette().background)),
-        ..container::Style::default()
-    }
-}
-
-/// The hairline that separates the sidebar from the content column.
+/// The hairlines that divide the header, sidebar, pane, and footer.
 pub fn separator(theme: &Theme) -> rule::Style {
     rule::Style {
         color: theme::separator(theme),
@@ -165,51 +139,54 @@ pub fn separator(theme: &Theme) -> rule::Style {
     }
 }
 
-/// A modal scrim that pushes the app behind the active sheet.
+/// A modal scrim that pushes the panel behind the active sheet, following the panel's corners.
 pub fn modal_scrim(theme: &Theme) -> container::Style {
     container::Style {
         background: Some(Background::Color(with_alpha(
             Color::BLACK,
-            if is_dark(theme) { 0.52 } else { 0.28 },
+            if is_dark(theme) { 0.45 } else { 0.20 },
         ))),
+        border: Border {
+            radius: PANEL_RADIUS.into(),
+            ..Border::default()
+        },
         ..container::Style::default()
     }
 }
 
-/// A sheet: the heaviest surface in the app, so it reads as arriving above everything else.
+/// A sheet: the heaviest surface in the panel, so it reads as arriving above everything else.
 pub fn sheet(theme: &Theme) -> container::Style {
+    container::Style {
+        background: Some(Background::Color(theme::raised(theme, 0.06, 0.75))),
+        text_color: Some(label(theme)),
+        border: Border {
+            radius: PANEL_RADIUS.into(),
+            width: 1.0,
+            color: theme::separator(theme),
+        },
+        shadow: Shadow {
+            color: with_alpha(Color::BLACK, if is_dark(theme) { 0.50 } else { 0.20 }),
+            offset: Vector::new(0.0, 12.0),
+            blur_radius: 36.0,
+        },
+        ..container::Style::default()
+    }
+}
+
+/// A tooltip bubble.
+pub fn tooltip(theme: &Theme) -> container::Style {
     container::Style {
         background: Some(Background::Color(theme::raised(theme, 0.10, 0.9))),
         text_color: Some(label(theme)),
         border: Border {
-            radius: 14.0.into(),
+            radius: 6.0.into(),
             width: 1.0,
-            color: with_alpha(Color::WHITE, if is_dark(theme) { 0.10 } else { 0.0 }),
+            color: theme::separator(theme),
         },
         shadow: Shadow {
-            color: with_alpha(Color::BLACK, if is_dark(theme) { 0.55 } else { 0.24 }),
-            offset: Vector::new(0.0, 18.0),
-            blur_radius: 48.0,
-        },
-        ..container::Style::default()
-    }
-}
-
-/// An inline status banner for launch results and persistence errors.
-pub fn status(theme: &Theme, is_error: bool) -> container::Style {
-    let palette = theme.extended_palette();
-    let accent = if is_error {
-        palette.danger.base.color
-    } else {
-        palette.success.base.color
-    };
-    container::Style {
-        text_color: Some(accent),
-        background: Some(Background::Color(with_alpha(accent, 0.12))),
-        border: Border {
-            radius: 9.0.into(),
-            width: 1.0,
-            color: with_alpha(accent, 0.30),
+            color: with_alpha(Color::BLACK, if is_dark(theme) { 0.4 } else { 0.14 }),
+            offset: Vector::new(0.0, 3.0),
+            blur_radius: 10.0,
         },
         ..container::Style::default()
     }
@@ -217,15 +194,20 @@ pub fn status(theme: &Theme, is_error: bool) -> container::Style {
 
 // ---------------------------------------------------------------- sidebar
 
-/// A group row in the sidebar; the selected row uses the system accent like a native source list.
-pub fn sidebar_row(theme: &Theme, status: button::Status, selected: bool) -> button::Style {
+/// A row of the source list. The selected row is filled with the accent, like a native sidebar;
+/// the others only paint a faint wash while hovered or pressed.
+pub fn source_list_row(theme: &Theme, status: button::Status, selected: bool) -> button::Style {
     let accent = theme::accent(theme);
     let (background, text_color) = if selected {
-        (accent, on_accent(accent))
+        let fill = match status {
+            button::Status::Pressed => mix(accent, Color::BLACK, 0.12),
+            _ => accent,
+        };
+        (fill, on_accent(accent))
     } else {
         let fill = match status {
-            button::Status::Hovered => with_alpha(theme.palette().text, 0.07),
-            button::Status::Pressed => with_alpha(theme.palette().text, 0.12),
+            button::Status::Hovered => with_alpha(theme.palette().text, 0.06),
+            button::Status::Pressed => with_alpha(theme.palette().text, 0.11),
             button::Status::Active | button::Status::Disabled => Color::TRANSPARENT,
         };
         (fill, label(theme))
@@ -234,11 +216,37 @@ pub fn sidebar_row(theme: &Theme, status: button::Status, selected: bool) -> but
         background: Some(Background::Color(background)),
         text_color,
         border: Border {
-            radius: 8.0.into(),
+            radius: 6.0.into(),
             ..Border::default()
         },
         shadow: Shadow::default(),
         ..button::Style::default()
+    }
+}
+
+/// A server group's row: the same look as [`source_list_row`], drawn by a container because the
+/// row is pressed and dragged rather than clicked. A row a dragged group would land on is outlined
+/// in the accent.
+pub fn source_list_surface(
+    theme: &Theme,
+    status: button::Status,
+    selected: bool,
+    drop_target: bool,
+) -> container::Style {
+    let row = source_list_row(theme, status, selected);
+    container::Style {
+        background: row.background,
+        text_color: Some(row.text_color),
+        border: if drop_target {
+            Border {
+                width: 2.0,
+                color: theme::accent(theme),
+                ..row.border
+            }
+        } else {
+            row.border
+        },
+        ..container::Style::default()
     }
 }
 
@@ -248,7 +256,7 @@ pub fn sidebar_row(theme: &Theme, status: button::Status, selected: bool) -> but
 pub fn primary_button(theme: &Theme, status: button::Status) -> button::Style {
     let accent = theme::accent(theme);
     let background = match status {
-        button::Status::Hovered => mix(accent, Color::WHITE, 0.12),
+        button::Status::Hovered => mix(accent, Color::WHITE, 0.10),
         button::Status::Pressed => mix(accent, Color::BLACK, 0.16),
         button::Status::Disabled => with_alpha(accent, 0.35),
         button::Status::Active => accent,
@@ -257,31 +265,44 @@ pub fn primary_button(theme: &Theme, status: button::Status) -> button::Style {
         background: Some(Background::Color(background)),
         text_color: on_accent(accent),
         border: Border {
-            radius: 8.0.into(),
+            radius: 7.0.into(),
             ..Border::default()
         },
-        shadow: Shadow::default(),
+        shadow: Shadow {
+            color: with_alpha(Color::BLACK, 0.12),
+            offset: Vector::new(0.0, 1.0),
+            blur_radius: 1.5,
+        },
         ..button::Style::default()
     }
 }
 
-/// The bordered button used for cancel and other secondary actions.
+/// The bordered push button used for cancel and other secondary actions.
 pub fn secondary_button(theme: &Theme, status: button::Status) -> button::Style {
+    let base = field_fill(theme);
     let text = theme.palette().text;
     let background = match status {
-        button::Status::Hovered => with_alpha(text, 0.10),
-        button::Status::Pressed => with_alpha(text, 0.16),
-        button::Status::Active | button::Status::Disabled => with_alpha(text, 0.05),
+        button::Status::Hovered => mix(base, text, 0.05),
+        button::Status::Pressed => mix(base, text, 0.11),
+        button::Status::Active | button::Status::Disabled => base,
     };
     button::Style {
         background: Some(Background::Color(background)),
         text_color: label(theme),
         border: Border {
-            radius: 8.0.into(),
+            radius: 7.0.into(),
             width: 1.0,
-            color: theme::separator(theme),
+            color: if is_dark(theme) {
+                color!(0x4A4B50)
+            } else {
+                with_alpha(Color::BLACK, 0.13)
+            },
         },
-        shadow: Shadow::default(),
+        shadow: Shadow {
+            color: with_alpha(Color::BLACK, if is_dark(theme) { 0.25 } else { 0.06 }),
+            offset: Vector::new(0.0, 1.0),
+            blur_radius: 1.0,
+        },
         ..button::Style::default()
     }
 }
@@ -290,7 +311,7 @@ pub fn secondary_button(theme: &Theme, status: button::Status) -> button::Style 
 pub fn destructive_button(theme: &Theme, status: button::Status) -> button::Style {
     let danger = theme.palette().danger;
     let background = match status {
-        button::Status::Hovered => mix(danger, Color::WHITE, 0.12),
+        button::Status::Hovered => mix(danger, Color::WHITE, 0.10),
         button::Status::Pressed => mix(danger, Color::BLACK, 0.16),
         button::Status::Disabled => with_alpha(danger, 0.35),
         button::Status::Active => danger,
@@ -298,63 +319,6 @@ pub fn destructive_button(theme: &Theme, status: button::Status) -> button::Styl
     button::Style {
         background: Some(Background::Color(background)),
         text_color: on_accent(danger),
-        border: Border {
-            radius: 8.0.into(),
-            ..Border::default()
-        },
-        shadow: Shadow::default(),
-        ..button::Style::default()
-    }
-}
-
-/// A borderless icon control that only paints a backplate while it is hovered or pressed.
-pub fn icon_button(theme: &Theme, status: button::Status) -> button::Style {
-    let text = theme.palette().text;
-    let background = match status {
-        button::Status::Hovered => with_alpha(text, 0.10),
-        button::Status::Pressed => with_alpha(text, 0.17),
-        button::Status::Active | button::Status::Disabled => Color::TRANSPARENT,
-    };
-    button::Style {
-        background: Some(Background::Color(background)),
-        text_color: label_secondary(theme),
-        border: Border {
-            radius: 8.0.into(),
-            ..Border::default()
-        },
-        shadow: Shadow::default(),
-        ..button::Style::default()
-    }
-}
-
-/// A segment of the provider picker, styled as one cell of a macOS segmented control.
-pub fn segment(theme: &Theme, status: button::Status, selected: bool) -> button::Style {
-    let accent = theme::accent(theme);
-    if selected {
-        return button::Style {
-            background: Some(Background::Color(accent)),
-            text_color: on_accent(accent),
-            border: Border {
-                radius: 7.0.into(),
-                ..Border::default()
-            },
-            shadow: Shadow {
-                color: with_alpha(Color::BLACK, 0.18),
-                offset: Vector::new(0.0, 1.0),
-                blur_radius: 3.0,
-            },
-            ..button::Style::default()
-        };
-    }
-    let text = theme.palette().text;
-    let background = match status {
-        button::Status::Hovered => with_alpha(text, 0.08),
-        button::Status::Pressed => with_alpha(text, 0.14),
-        button::Status::Active | button::Status::Disabled => Color::TRANSPARENT,
-    };
-    button::Style {
-        background: Some(Background::Color(background)),
-        text_color: label(theme),
         border: Border {
             radius: 7.0.into(),
             ..Border::default()
@@ -364,91 +328,175 @@ pub fn segment(theme: &Theme, status: button::Status, selected: bool) -> button:
     }
 }
 
-/// The recessed track a segmented control sits in.
-pub fn segment_track(theme: &Theme) -> container::Style {
-    container::Style {
-        background: Some(Background::Color(field_fill(theme))),
-        border: Border {
-            radius: 9.0.into(),
-            width: 1.0,
-            color: theme::separator(theme),
-        },
-        ..container::Style::default()
-    }
-}
-
-/// A category chip: a compact, content-sized control that sits one level below a group card.
-///
-/// A category with a label color is tinted rather than flooded with it: a translucent wash of the
-/// color, a border in the same color, and the ordinary label color for the text. Opening the
-/// category deepens the wash and thickens the border instead of inverting the chip, which keeps
-/// the name readable and the color recognizable in every state.
-pub fn chip(
-    theme: &Theme,
-    status: button::Status,
-    selected: bool,
-    color: Option<Color>,
-) -> button::Style {
-    if let Some(color) = color {
-        let resting = if selected { 0.26 } else { 0.11 };
-        let wash = match status {
-            button::Status::Hovered => resting + 0.09,
-            button::Status::Pressed => resting + 0.16,
-            button::Status::Active | button::Status::Disabled => resting,
-        };
-        return button::Style {
-            background: Some(Background::Color(with_alpha(color, wash))),
-            text_color: label(theme),
-            border: Border {
-                radius: 9.0.into(),
-                width: if selected { 2.0 } else { 1.0 },
-                color: with_alpha(color, if selected { 0.9 } else { 0.4 }),
-            },
-            shadow: Shadow::default(),
-            ..button::Style::default()
-        };
-    }
-    let accent = theme::accent(theme);
-    if selected {
-        let background = match status {
-            button::Status::Hovered => mix(accent, Color::WHITE, 0.10),
-            button::Status::Pressed => mix(accent, Color::BLACK, 0.14),
-            button::Status::Active | button::Status::Disabled => accent,
-        };
-        return button::Style {
-            background: Some(Background::Color(background)),
-            text_color: on_accent(accent),
-            border: Border {
-                radius: 9.0.into(),
-                ..Border::default()
-            },
-            shadow: Shadow::default(),
-            ..button::Style::default()
-        };
-    }
+/// A borderless control that only paints a backplate while it is hovered or pressed: icon
+/// buttons, and text actions such as the footer's add button.
+pub fn icon_button(theme: &Theme, status: button::Status) -> button::Style {
     let text = theme.palette().text;
     let background = match status {
-        button::Status::Hovered => with_alpha(text, 0.10),
-        button::Status::Pressed => with_alpha(text, 0.15),
-        button::Status::Active | button::Status::Disabled => with_alpha(text, 0.05),
+        button::Status::Hovered => with_alpha(text, 0.08),
+        button::Status::Pressed => with_alpha(text, 0.14),
+        button::Status::Active | button::Status::Disabled => Color::TRANSPARENT,
     };
     button::Style {
         background: Some(Background::Color(background)),
-        text_color: label(theme),
+        text_color: label_secondary(theme),
         border: Border {
-            radius: 9.0.into(),
-            width: 1.0,
-            color: theme::separator(theme),
+            radius: 6.0.into(),
+            ..Border::default()
         },
         shadow: Shadow::default(),
         ..button::Style::default()
     }
 }
 
-/// Marks a chip as somewhere a dragged launcher can land.
+/// The pin button, which stays visibly pressed while the panel is pinned open.
+pub fn toggle_button(theme: &Theme, status: button::Status, on: bool) -> button::Style {
+    if !on {
+        return icon_button(theme, status);
+    }
+    let accent = theme::accent(theme);
+    button::Style {
+        background: Some(Background::Color(with_alpha(
+            accent,
+            if matches!(status, button::Status::Hovered) {
+                0.22
+            } else {
+                0.16
+            },
+        ))),
+        text_color: accent,
+        border: Border {
+            radius: 6.0.into(),
+            ..Border::default()
+        },
+        shadow: Shadow::default(),
+        ..button::Style::default()
+    }
+}
+
+/// One segment of a segmented control. The selected segment is a raised plate on the recessed
+/// track, with its label in the accent, as in `NSSegmentedControl`'s capsule style.
+pub fn segment(theme: &Theme, status: button::Status, selected: bool) -> button::Style {
+    if selected {
+        return button::Style {
+            background: Some(Background::Color(if is_dark(theme) {
+                color!(0x46474C)
+            } else {
+                Color::WHITE
+            })),
+            text_color: if is_dark(theme) {
+                label(theme)
+            } else {
+                theme::accent(theme)
+            },
+            border: Border {
+                radius: 6.0.into(),
+                width: if is_dark(theme) { 0.0 } else { 0.5 },
+                color: with_alpha(Color::BLACK, 0.06),
+            },
+            shadow: Shadow {
+                color: with_alpha(Color::BLACK, if is_dark(theme) { 0.35 } else { 0.10 }),
+                offset: Vector::new(0.0, 1.0),
+                blur_radius: 2.5,
+            },
+            ..button::Style::default()
+        };
+    }
+    let text = theme.palette().text;
+    let background = match status {
+        button::Status::Hovered => with_alpha(text, 0.05),
+        button::Status::Pressed => with_alpha(text, 0.10),
+        button::Status::Active | button::Status::Disabled => Color::TRANSPARENT,
+    };
+    button::Style {
+        background: Some(Background::Color(background)),
+        text_color: label_secondary(theme),
+        border: Border {
+            radius: 6.0.into(),
+            ..Border::default()
+        },
+        shadow: Shadow::default(),
+        ..button::Style::default()
+    }
+}
+
+/// A category pill: a capsule outlined in a quiet gray, or, when selected, outlined in the accent
+/// over a faint wash of it with its label in the accent.
+pub fn pill(theme: &Theme, status: button::Status, selected: bool) -> button::Style {
+    let accent = theme::accent(theme);
+    let dark = is_dark(theme);
+    let high_contrast = theme::increased_contrast(theme);
+    let radius = 14.0.into();
+    if selected {
+        return button::Style {
+            background: Some(Background::Color(with_alpha(
+                accent,
+                if dark { 0.20 } else { 0.08 },
+            ))),
+            // On a dark ground the accent itself is too deep to read against its own wash.
+            text_color: if dark {
+                theme::mix(accent, Color::WHITE, 0.45)
+            } else {
+                accent
+            },
+            border: Border {
+                radius,
+                width: 1.5,
+                color: accent,
+            },
+            ..button::Style::default()
+        };
+    }
+    let text = theme.palette().text;
+    let background = match status {
+        button::Status::Hovered => with_alpha(text, 0.05),
+        button::Status::Pressed => with_alpha(text, 0.10),
+        button::Status::Active | button::Status::Disabled => Color::TRANSPARENT,
+    };
+    let outline = match (dark, high_contrast) {
+        (_, true) => theme::separator(theme),
+        (true, false) => color!(0x4A4B50),
+        (false, false) => with_alpha(Color::BLACK, 0.16),
+    };
+    button::Style {
+        background: Some(Background::Color(background)),
+        text_color: label_secondary(theme),
+        border: Border {
+            radius,
+            width: 1.0,
+            color: outline,
+        },
+        ..button::Style::default()
+    }
+}
+
+/// The recessed track a segmented control sits in.
+pub fn segment_track(theme: &Theme) -> container::Style {
+    container::Style {
+        background: Some(Background::Color(if is_dark(theme) {
+            color!(0x1C1D20)
+        } else {
+            with_alpha(Color::BLACK, 0.055)
+        })),
+        // With Increase Contrast the control is outlined, so its extent never depends on a faint
+        // fill alone.
+        border: Border {
+            radius: 8.0.into(),
+            width: if theme::increased_contrast(theme) {
+                1.0
+            } else {
+                0.0
+            },
+            color: theme::separator(theme),
+        },
+        ..container::Style::default()
+    }
+}
+
+/// Marks a segment as somewhere a dragged launcher can land.
 ///
 /// Available targets are outlined; the one under the pointer is also filled, so the answer to
-/// "where would this land if I let go now" is a single obvious chip rather than a row of equals.
+/// "where would this land if I let go now" is a single obvious segment rather than a row of equals.
 pub fn drop_target(theme: &Theme, base: &button::Style, engaged: bool) -> button::Style {
     let accent = theme::accent(theme);
     button::Style {
@@ -457,6 +505,7 @@ pub fn drop_target(theme: &Theme, base: &button::Style, engaged: bool) -> button
         } else {
             base.background
         },
+        text_color: if engaged { accent } else { base.text_color },
         border: Border {
             width: if engaged { 2.0 } else { 1.5 },
             color: with_alpha(accent, if engaged { 1.0 } else { 0.55 }),
@@ -466,171 +515,169 @@ pub fn drop_target(theme: &Theme, base: &button::Style, engaged: bool) -> button
     }
 }
 
-/// The quiet chip that adds a category, kept lighter than the real ones.
-pub fn add_chip(theme: &Theme, status: button::Status) -> button::Style {
-    let mut style = chip(theme, status, false, None);
-    style.background = match status {
-        button::Status::Hovered | button::Status::Pressed => style.background,
-        button::Status::Active | button::Status::Disabled => None,
+// ---------------------------------------------------------------- list rows
+
+/// A launcher row. Rows carry no card of their own; the selected one is washed with the accent and
+/// a hovered one with the label color, both inset with a small radius like a source-list row.
+pub fn list_row(theme: &Theme, selected: bool, hovered: bool, held: bool) -> container::Style {
+    let accent = theme::accent(theme);
+    let background = if selected || held {
+        with_alpha(accent, if is_dark(theme) { 0.26 } else { 0.13 })
+    } else if hovered {
+        with_alpha(theme.palette().text, 0.045)
+    } else {
+        Color::TRANSPARENT
     };
-    style.text_color = label_secondary(theme);
-    style
+    container::Style {
+        background: Some(Background::Color(background)),
+        text_color: Some(label(theme)),
+        // With Increase Contrast the selection is also outlined, so it never rests on a wash alone.
+        border: Border {
+            radius: 7.0.into(),
+            width: if theme::increased_contrast(theme) && (selected || held) {
+                1.5
+            } else {
+                0.0
+            },
+            color: accent,
+        },
+        ..container::Style::default()
+    }
 }
 
-// ---------------------------------------------------------------- tiles
-
-/// A launcher tile: a solid, readable surface with a soft elevation shadow.
-///
-/// A card carrying a label color is washed with it. The wash is mixed into the surface rather than
-/// laid over it with alpha, so the card stays opaque above the content gradient and its text keeps
-/// the contrast it has on every other card.
-pub fn tile(
-    theme: &Theme,
-    status: button::Status,
-    selected: bool,
-    color: Option<Color>,
-) -> button::Style {
-    let accent = color.unwrap_or_else(|| theme::accent(theme));
-    let base = match color {
-        Some(color) => mix(
-            theme::raised(theme, 0.09, 1.0),
-            color,
-            if selected { 0.24 } else { 0.14 },
-        ),
-        None => theme::raised(theme, 0.09, 1.0),
-    };
-    let background = match (status, color) {
-        (button::Status::Hovered, None) => theme::raised(theme, 0.13, 0.94),
-        (button::Status::Hovered, Some(color)) => mix(base, color, 0.10),
-        (button::Status::Pressed, _) => mix(base, accent, 0.14),
-        (button::Status::Active | button::Status::Disabled, _) => base,
-    };
-    let shadow = match status {
-        button::Status::Pressed => Shadow {
-            color: with_alpha(Color::BLACK, shadow_strength(theme, 0.5)),
-            offset: Vector::new(0.0, 1.0),
-            blur_radius: 3.0,
-        },
-        button::Status::Hovered => Shadow {
-            color: with_alpha(Color::BLACK, shadow_strength(theme, 1.4)),
-            offset: Vector::new(0.0, 6.0),
-            blur_radius: 16.0,
-        },
-        button::Status::Active | button::Status::Disabled => Shadow {
-            color: with_alpha(Color::BLACK, shadow_strength(theme, 1.0)),
-            offset: Vector::new(0.0, 2.0),
-            blur_radius: 8.0,
-        },
-    };
-    button::Style {
-        background: Some(Background::Color(background)),
-        text_color: label(theme),
+/// The row that follows the pointer during a drag: the same row lifted onto a plate of its own,
+/// under a shadow, so it reads as held above the list rather than as a second copy in it.
+pub fn dragged_row(theme: &Theme) -> container::Style {
+    container::Style {
+        background: Some(Background::Color(theme::raised(theme, 0.08, 0.85))),
+        text_color: Some(label(theme)),
         border: Border {
-            radius: 14.0.into(),
-            width: if selected { 2.0 } else { 1.0 },
-            color: match (selected, color) {
-                (true, _) => accent,
-                (false, Some(color)) => with_alpha(color, 0.45),
-                (false, None) => with_alpha(
-                    theme.palette().text,
-                    if is_dark(theme) { 0.09 } else { 0.07 },
-                ),
+            radius: 8.0.into(),
+            width: 1.5,
+            color: theme::accent(theme),
+        },
+        shadow: Shadow {
+            color: with_alpha(Color::BLACK, if is_dark(theme) { 0.55 } else { 0.22 }),
+            offset: Vector::new(0.0, 8.0),
+            blur_radius: 20.0,
+        },
+        snap: true,
+    }
+}
+
+/// The rounded square a row's symbol sits on.
+///
+/// A launcher with a label color is tinted with it — a border in the color around the ordinary
+/// plate, and the symbol in the color — rather than flooded, so the row stays readable.
+pub fn icon_tile(theme: &Theme, color: Option<Color>) -> container::Style {
+    container::Style {
+        background: Some(Background::Color(match color {
+            Some(color) => mix(field_fill(theme), color, 0.10),
+            None => field_fill(theme),
+        })),
+        border: Border {
+            radius: 7.0.into(),
+            width: 1.0,
+            color: match color {
+                Some(color) => with_alpha(color, 0.55),
+                None => theme::separator(theme),
             },
         },
-        shadow,
-        ..button::Style::default()
-    }
-}
-
-/// A launcher card's surface.
-///
-/// The card is not a button — it has to tell a click, a double click, and the start of a drag
-/// apart, and a button consumes the press before any of that can be decided — so it draws itself
-/// through a container. The appearance is still [`tile`]'s: one definition of what a card looks
-/// like, whichever widget happens to be carrying it.
-pub fn tile_surface(
-    theme: &Theme,
-    status: button::Status,
-    selected: bool,
-    color: Option<Color>,
-) -> container::Style {
-    let surface = tile(theme, status, selected, color);
-    container::Style {
-        background: surface.background,
-        text_color: Some(label(theme)),
-        border: surface.border,
-        shadow: surface.shadow,
-        snap: true,
-    }
-}
-
-/// The card that follows the pointer during a drag.
-///
-/// It is the hovered card, lifted: the same surface under a deeper shadow, so it reads as being
-/// held above the grid rather than as a second copy sitting in it.
-pub fn dragged_tile(theme: &Theme, color: Option<Color>) -> container::Style {
-    let surface = tile(theme, button::Status::Hovered, true, color);
-    container::Style {
-        background: surface.background,
-        text_color: Some(label(theme)),
-        border: surface.border,
         shadow: Shadow {
-            color: with_alpha(Color::BLACK, shadow_strength(theme, 2.2)),
-            offset: Vector::new(0.0, 10.0),
-            blur_radius: 24.0,
+            color: with_alpha(Color::BLACK, if is_dark(theme) { 0.25 } else { 0.05 }),
+            offset: Vector::new(0.0, 1.0),
+            blur_radius: 1.5,
         },
-        snap: true,
+        ..container::Style::default()
     }
 }
 
-/// The add tile: deliberately quieter than a real launcher, but still keyboard reachable.
-pub fn add_tile(theme: &Theme, status: button::Status) -> button::Style {
+/// An inline status line for launch results and persistence errors.
+pub fn status_text(theme: &Theme, is_error: bool) -> text::Style {
+    let palette = theme.palette();
+    text::Style {
+        color: Some(if is_error {
+            palette.danger
+        } else {
+            label_secondary(theme)
+        }),
+    }
+}
+
+// ---------------------------------------------------------------- scrolling and menus
+
+/// An overlay scrollbar: no rail, and a thin scroller that darkens while it is used, the way a
+/// macOS scroller looks rather than a block of color down the side of the list.
+pub fn scroller(theme: &Theme, status: scrollable::Status) -> scrollable::Style {
     let text = theme.palette().text;
-    let background = match status {
-        button::Status::Hovered => with_alpha(text, 0.06),
-        button::Status::Pressed => with_alpha(text, 0.11),
-        button::Status::Active | button::Status::Disabled => Color::TRANSPARENT,
-    };
-    button::Style {
-        background: Some(Background::Color(background)),
-        text_color: label_secondary(theme),
-        border: Border {
-            radius: 14.0.into(),
-            width: 1.0,
-            color: with_alpha(text, if is_dark(theme) { 0.17 } else { 0.14 }),
+    let engaged = matches!(
+        status,
+        scrollable::Status::Hovered {
+            is_vertical_scrollbar_hovered: true,
+            ..
+        } | scrollable::Status::Dragged { .. }
+    );
+    let rail = scrollable::Rail {
+        background: None,
+        border: Border::default(),
+        scroller: scrollable::Scroller {
+            background: Background::Color(with_alpha(text, if engaged { 0.45 } else { 0.22 })),
+            border: Border {
+                radius: 3.0.into(),
+                ..Border::default()
+            },
         },
-        shadow: Shadow::default(),
-        ..button::Style::default()
+    };
+    scrollable::Style {
+        container: container::Style::default(),
+        vertical_rail: rail,
+        horizontal_rail: rail,
+        gap: None,
+        ..scrollable::default(theme, status)
     }
 }
 
-/// The quiet backplate on the add tile, aligned with the symbol backplates next to it.
-pub fn add_badge(theme: &Theme) -> container::Style {
-    container::Style {
-        background: Some(Background::Color(with_alpha(theme.palette().text, 0.06))),
+/// A pop-up button, such as the category chooser in the launcher editor.
+pub fn popup_button(theme: &Theme, status: pick_list::Status) -> pick_list::Style {
+    let hovered = matches!(
+        status,
+        pick_list::Status::Hovered | pick_list::Status::Opened { .. }
+    );
+    pick_list::Style {
+        text_color: label(theme),
+        placeholder_color: label_tertiary(theme),
+        handle_color: label_secondary(theme),
+        background: Background::Color(if hovered {
+            mix(field_fill(theme), theme.palette().text, 0.03)
+        } else {
+            field_fill(theme)
+        }),
         border: Border {
-            radius: 12.0.into(),
+            radius: 7.0.into(),
             width: 1.0,
             color: theme::separator(theme),
         },
-        ..container::Style::default()
     }
 }
 
-/// The rounded backplate behind a tile's symbol.
-pub fn badge(color: Color) -> container::Style {
-    container::Style {
-        background: Some(Background::Color(color)),
+/// The menu a pop-up button opens.
+pub fn menu(theme: &Theme) -> overlay::menu::Style {
+    let accent = theme::accent(theme);
+    overlay::menu::Style {
+        background: Background::Color(theme::raised(theme, 0.08, 0.9)),
         border: Border {
-            radius: 12.0.into(),
-            ..Border::default()
+            radius: 7.0.into(),
+            width: 1.0,
+            color: theme::separator(theme),
         },
+        text_color: label(theme),
+        selected_text_color: on_accent(accent),
+        selected_background: Background::Color(accent),
         shadow: Shadow {
-            color: with_alpha(color, 0.22),
-            offset: Vector::new(0.0, 1.0),
-            blur_radius: 4.0,
+            color: with_alpha(Color::BLACK, if is_dark(theme) { 0.45 } else { 0.16 }),
+            offset: Vector::new(0.0, 6.0),
+            blur_radius: 16.0,
         },
-        ..container::Style::default()
     }
 }
 
@@ -641,7 +688,25 @@ pub fn search_field(theme: &Theme) -> container::Style {
     container::Style {
         background: Some(Background::Color(field_fill(theme))),
         border: Border {
-            radius: 8.0.into(),
+            radius: 7.0.into(),
+            width: 1.0,
+            color: theme::separator(theme),
+        },
+        shadow: Shadow {
+            color: with_alpha(Color::BLACK, if is_dark(theme) { 0.2 } else { 0.03 }),
+            offset: Vector::new(0.0, 1.0),
+            blur_radius: 1.0,
+        },
+        ..container::Style::default()
+    }
+}
+
+/// A read-only value shown in a field-shaped well, such as the config path in Settings.
+pub fn value_well(theme: &Theme) -> container::Style {
+    container::Style {
+        background: Some(Background::Color(field_fill(theme))),
+        border: Border {
+            radius: 7.0.into(),
             width: 1.0,
             color: theme::separator(theme),
         },
@@ -732,10 +797,17 @@ pub fn tertiary_text(theme: &Theme) -> text::Style {
     }
 }
 
-/// The de-emphasized text on a chip filled with the system accent, such as its launcher count.
-pub fn on_chip_text(theme: &Theme) -> text::Style {
+/// The de-emphasized text on a row filled with the system accent, such as its launcher count.
+pub fn on_accent_secondary_text(theme: &Theme) -> text::Style {
     text::Style {
-        color: Some(with_alpha(on_accent(theme::accent(theme)), 0.75)),
+        color: Some(with_alpha(on_accent(theme::accent(theme)), 0.78)),
+    }
+}
+
+/// A heading in the source list, such as "Groups".
+pub fn section_heading_text(theme: &Theme) -> text::Style {
+    text::Style {
+        color: Some(with_alpha(theme.palette().text, 0.50)),
     }
 }
 
@@ -757,14 +829,10 @@ pub fn error_text(theme: &Theme) -> text::Style {
 
 fn field_fill(theme: &Theme) -> Color {
     if is_dark(theme) {
-        with_alpha(Color::BLACK, 0.22)
+        color!(0x37383C)
     } else {
-        with_alpha(Color::WHITE, 0.85)
+        Color::WHITE
     }
-}
-
-fn shadow_strength(theme: &Theme, scale: f32) -> f32 {
-    (if is_dark(theme) { 0.30 } else { 0.09 }) * scale
 }
 
 /// Picks black or white text for a filled control, so accent colors stay legible.
@@ -787,30 +855,31 @@ mod tests {
 
     use crate::theme::Appearance;
 
-    use super::{Accent, on_accent, sidebar_row, tile};
+    use super::{list_row, on_accent, pane, segment, source_list_row};
 
     fn themes() -> [Theme; 2] {
         [
-            Appearance { dark: true }.theme(),
-            Appearance { dark: false }.theme(),
+            Appearance {
+                dark: true,
+                ..Appearance::default()
+            }
+            .theme(),
+            Appearance::default().theme(),
         ]
     }
 
     #[test]
-    fn light_and_dark_tiles_never_share_a_hard_coded_surface_color() {
+    fn light_and_dark_panes_never_share_a_hard_coded_surface_color() {
         let [dark, light] = themes();
 
-        assert_ne!(
-            tile(&dark, button::Status::Active, false, None).background,
-            tile(&light, button::Status::Active, false, None).background
-        );
+        assert_ne!(pane(&dark).background, pane(&light).background);
     }
 
     #[test]
-    fn a_selected_sidebar_row_is_filled_with_the_system_accent() {
+    fn a_selected_source_list_row_is_filled_with_the_system_accent() {
         for theme in themes() {
-            let selected = sidebar_row(&theme, button::Status::Active, true);
-            let hovered = sidebar_row(&theme, button::Status::Hovered, false);
+            let selected = source_list_row(&theme, button::Status::Active, true);
+            let hovered = source_list_row(&theme, button::Status::Hovered, false);
 
             assert_eq!(
                 selected.background,
@@ -822,38 +891,27 @@ mod tests {
     }
 
     #[test]
-    fn a_selected_tile_gains_a_visible_focus_ring() {
+    fn the_selected_segment_is_raised_off_its_track() {
         for theme in themes() {
-            assert!(
-                tile(&theme, button::Status::Active, true, None)
-                    .border
-                    .width
-                    > tile(&theme, button::Status::Active, false, None)
-                        .border
-                        .width
-            );
+            let selected = segment(&theme, button::Status::Active, true);
+            let resting = segment(&theme, button::Status::Active, false);
+
+            assert_ne!(selected.background, resting.background);
+            assert!(selected.shadow.blur_radius > resting.shadow.blur_radius);
         }
     }
 
     #[test]
-    fn every_launcher_kind_gets_a_distinct_backplate_in_both_appearances() {
+    fn a_selected_row_is_marked_by_more_than_its_hover_wash() {
         for theme in themes() {
-            let mut colors = Vec::new();
-            for accent in [
-                Accent::Blue,
-                Accent::Indigo,
-                Accent::Teal,
-                Accent::Green,
-                Accent::Orange,
-                Accent::Gray,
-            ] {
-                let color = accent.color(&theme);
-                assert!(
-                    !colors.contains(&color.into_rgba8()),
-                    "two launcher kinds share the backplate {color:?}"
-                );
-                colors.push(color.into_rgba8());
-            }
+            assert_ne!(
+                list_row(&theme, true, false, false).background,
+                list_row(&theme, false, true, false).background
+            );
+            assert_eq!(
+                list_row(&theme, false, false, false).background,
+                Some(iced::Background::Color(Color::TRANSPARENT))
+            );
         }
     }
 

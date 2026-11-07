@@ -6,6 +6,11 @@ edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 
+[features]
+# Development-only hooks for driving and photographing the real menu-bar panel from inside the app.
+# Enabled only through the UI crate's `capture` feature; never in a release build.
+self-test = ["dep:objc2-core-graphics", "objc2-app-kit/objc2-core-graphics", "objc2-app-kit/NSGraphicsContext", "objc2-foundation/NSData", "objc2-foundation/NSDate"]
+
 [dependencies]
 directories.workspace = true
 despatch-application = { path = "../despatch-application" }
@@ -16,8 +21,9 @@ thiserror.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2.workspace = true
-objc2-app-kit = { workspace = true, features = ["NSAccessibilityConstants", "NSAccessibilityElement", "NSAccessibilityProtocols", "NSApplication", "NSBitmapImageRep", "NSColor", "NSColorSpace", "NSFontDescriptor", "NSGraphics", "objc2-core-foundation", "NSGraphicsContext", "NSImage", "NSImageRep", "NSOpenPanel", "NSPanel", "NSResponder", "NSSavePanel", "NSView", "NSWindow"] }
-objc2-foundation = { workspace = true, features = ["NSArray", "NSDictionary", "NSGeometry", "NSObject", "NSString"] }
+objc2-core-graphics = { version = "0.3.2", default-features = false, features = ["std", "CGImage", "CGWindow"], optional = true }
+objc2-app-kit = { workspace = true, features = ["NSAccessibility", "NSAccessibilityConstants", "NSAccessibilityElement", "NSAccessibilityProtocols", "NSAnimation", "NSAnimationContext", "NSApplication", "NSBitmapImageRep", "NSButton", "NSCell", "NSColor", "NSColorSpace", "NSControl", "NSEvent", "NSFontDescriptor", "NSGraphics", "objc2-core-foundation", "NSGraphicsContext", "NSImage", "NSImageRep", "NSMenu", "NSMenuItem", "NSOpenPanel", "NSPanel", "NSResponder", "NSRunningApplication", "NSSavePanel", "NSScreen", "NSStatusBar", "NSStatusBarButton", "NSStatusItem", "NSView", "NSWindow", "NSWorkspace"] }
+objc2-foundation = { workspace = true, features = ["NSArray", "NSDictionary", "NSError", "NSGeometry", "NSNotification", "NSObject", "NSString"] }
 
 [dev-dependencies]
 serde_json.workspace = true

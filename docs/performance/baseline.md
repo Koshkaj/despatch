@@ -77,3 +77,27 @@ SF Symbol textures:
 The three decoded 48 × 48 RGBA symbol buffers total 27 KiB. The measured memory change is small,
 and the UI remains idle at 0% CPU because blur is supplied by the macOS compositor and icons are
 uploaded once rather than redrawn by a subscription.
+
+## Menu-bar panel comparison
+
+Measured on 2026-11-07 after the facelift into a menu-bar panel (`facelift.md`), with the
+optimized binary run against a sample config of four groups and twelve launchers. CPU is the CPU
+time the process consumed over ten idle seconds, read from `ps -o time=` before and after, rather
+than `ps`'s `%cpu`, which is a decaying average that still carries startup work five seconds in.
+
+| Property | Panel shown | Panel hidden |
+| --- | --- | --- |
+| RSS samples | 110,416 KiB; 96,688 KiB; 110,496 KiB | 110,528 KiB; 96,848 KiB; 110,224 KiB |
+| Median RSS | 110,416 KiB (107.8 MiB) | 110,224 KiB (107.6 MiB) |
+| CPU time over 10 s idle | 0.06 s; 0.05 s; 0.05 s | 0.00 s; 0.01 s; 0.00 s |
+
+The median RSS is 16,048 KiB (+17%) above the previous measurement. The interface is now set in
+the system's variable San Francisco face instead of a small bundled font, and the shaper maps and
+touches that much larger file; and 35 symbols are kept pre-tinted in six roles on a 64-point
+canvas (about 3.4 MiB of masks before upload), against three before. Hiding the panel does not
+release memory, because the window and its renderer are kept so reopening is instant.
+
+The measurement also found, and this change fixed, a loop that predates the facelift: every update
+re-installed the accessibility tree, the install reported back with a message, and that message
+ran an update — about 650 updates a second, holding a core at roughly 25% with nothing on screen
+changing. The tree is now sent only when it differs from the one installed, and a test holds that.

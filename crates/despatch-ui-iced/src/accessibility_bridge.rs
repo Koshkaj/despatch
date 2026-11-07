@@ -1,12 +1,12 @@
 use despatch_platform_macos::{
-    NativeAccessibilityNode, NativeAccessibilityRole, install_accessibility_root,
+    NativeAccessibilityNode, NativeAccessibilityRole, PressHandler, install_accessibility_root,
 };
 use iced::window::Window;
 use iced::window::raw_window_handle::RawWindowHandle;
 
 use crate::accessibility::{Node, Role};
 
-pub fn install(window: &dyn Window, nodes: &[Node]) -> Result<(), String> {
+pub fn install(window: &dyn Window, nodes: &[Node], on_press: &PressHandler) -> Result<(), String> {
     let handle = window
         .window_handle()
         .map_err(|error| format!("native window handle is unavailable: {error}"))?;
@@ -23,7 +23,11 @@ pub fn install(window: &dyn Window, nodes: &[Node]) -> Result<(), String> {
             },
             label: node.label.clone(),
             selected: node.selected,
+            frame: node
+                .frame
+                .map(|[x, y, width, height]| [x, y, width, height].map(f64::from)),
+            pressable: node.action.is_some(),
         })
         .collect();
-    install_accessibility_root(handle.ns_view, &nodes)
+    install_accessibility_root(handle.ns_view, &nodes, on_press)
 }

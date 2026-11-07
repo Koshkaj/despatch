@@ -8,9 +8,10 @@ use despatch_domain::{
 
 use crate::{
     AppState, ApplicationError, CommandLaunchRequest, ConfigDocument, ConfigRepository,
-    ConfigStatus, FileRevealer, HostProbe, LaunchOutcome, LaunchRequest, LocalPreferences,
-    PortError, PortErrorKind, RawShellLaunchRequest, Reachability, ReachabilityRequest,
-    RepositorySaveExpectation, SshLaunchRequest, TerminalLauncher,
+    ConfigStatus, EphemeralRecentLaunches, FileRevealer, HostProbe, LaunchOutcome, LaunchRequest,
+    LocalPreferences, PortError, PortErrorKind, RawShellLaunchRequest, Reachability,
+    ReachabilityRequest, RecentLaunch, RecentLaunches, RepositorySaveExpectation, SshLaunchRequest,
+    TerminalLauncher,
 };
 
 #[derive(Clone)]
@@ -21,10 +22,13 @@ pub struct Application {
     terminal: Arc<dyn TerminalLauncher>,
     file_revealer: Arc<dyn FileRevealer>,
     host_probe: Arc<dyn HostProbe>,
-    executables: Arc<dyn crate::ExecutableLocator>,
+    recents: Arc<dyn RecentLaunches>,
 }
 
 impl Application {
+    /// How many launches "Recently used" remembers.
+    pub const RECENT_LIMIT: usize = 20;
+
     #[must_use]
     pub fn new(
         repository: Arc<dyn ConfigRepository>,
@@ -32,7 +36,6 @@ impl Application {
         terminal: Arc<dyn TerminalLauncher>,
         file_revealer: Arc<dyn FileRevealer>,
         host_probe: Arc<dyn HostProbe>,
-        executables: Arc<dyn crate::ExecutableLocator>,
     ) -> Self {
         Self {
             state: AppState::default(),
@@ -41,18 +44,74 @@ impl Application {
             terminal,
             file_revealer,
             host_probe,
-            executables,
+            recents: Arc::new(EphemeralRecentLaunches),
         }
     }
 
-    /// Checks that the program a launcher names can actually be found.
+    /// Keeps the launch history in `store`, starting from what it already holds.
     ///
-    /// A shell alias is not a program: it lives in the user's shell configuration and cannot be
-    /// executed directly, so it fails here. That is the correct answer — a launcher naming an
-    /// alias would never have run — and the way to reproduce one is an absolute path plus the
-    /// environment variables the alias sets.
-    pub fn locate_executable(&self, executable: &str) -> Result<std::path::PathBuf, PortError> {
-        self.executables.locate(executable)
+    /// A history that cannot be read starts empty rather than failing startup: it is a convenience,
+    /// and nothing about the config depends on it.
+    #[must_use]
+    pub fn with_recents(mut self, store: Arc<dyn RecentLaunches>) -> Self {
+        self.state.recents = store.load().unwrap_or_default();
+        self.state.recents.truncate(Self::RECENT_LIMIT);
+        self.recents = store;
+        self
+    }
+
+    /// The remembered launches whose launcher still exists in the open config, newest first.
+    ///
+    /// Launchers deleted since, or belonging to another config, are left out rather than shown as
+    /// entries that can no longer be opened.
+    #[must_use]
+    pub fn recent_launches(&self) -> Vec<RecentLaunch> {
+        self.state
+            .recents
+            .iter()
+            .filter(|recent| {
+                self.state
+                    .config
+                    .locate_launcher(recent.launcher_id)
+                    .is_some_and(|(group, _)| group.section == Section::Servers)
+            })
+            .copied()
+            .collect()
+    }
+
+    /// Forgets every remembered launch.
+    pub fn clear_recents(&mut self) -> Result<(), ApplicationError> {
+        self.state.recents.clear();
+        self.recents
+            .save(&self.state.recents)
+            .map_err(ApplicationError::Preferences)
+    }
+
+    /// Moves `launcher_id` to the front of the history and writes it.
+    ///
+    /// Entries for launchers the open config no longer has are dropped on the way, so the history
+    /// cannot fill up with things that can never be opened again. A history that cannot be written
+    /// never fails the launch it records: the terminal has already opened.
+    fn remember_launch(&mut self, launcher_id: LauncherId) {
+        let config = &self.state.config;
+        self.state.recents.retain(|recent| {
+            recent.launcher_id != launcher_id
+                && config.locate_launcher(recent.launcher_id).is_some()
+        });
+        self.state.recents.insert(
+            0,
+            RecentLaunch {
+                launcher_id,
+                used_at: std::time::SystemTime::now(),
+            },
+        );
+        self.state.recents.truncate(Self::RECENT_LIMIT);
+        if let Err(error) = self.recents.save(&self.state.recents) {
+            self.state.last_error = Some(PortError::new(
+                error.kind(),
+                format!("Recently used could not be saved: {}", error.message()),
+            ));
+        }
     }
 
     /// How long a reachability check waits before calling a host unreachable.
@@ -80,6 +139,7 @@ impl Application {
     }
 
     pub fn load_startup(&mut self, default_path: &Path) -> Result<(), ApplicationError> {
+        self.restore_terminal();
         let selected_path = self
             .preferences
             .selected_config_path()
@@ -105,9 +165,9 @@ impl Application {
         self.activate_document(document)
     }
 
-    /// Creates a config file, seeded with the agent CLIs this app knows how to run.
+    /// Creates an empty config file.
     pub fn create_config(&mut self, path: &Path) -> Result<(), ApplicationError> {
-        let config = AppConfig::seeded();
+        let config = AppConfig::default();
         let fingerprint = self
             .repository
             .save(path, &config, RepositorySaveExpectation::NewFile)
@@ -464,6 +524,7 @@ impl Application {
         match self.terminal.launch(&request) {
             Ok(()) => {
                 self.state.last_launch = Some(LaunchOutcome::Success { launcher_id });
+                self.remember_launch(launcher_id);
                 Ok(())
             }
             Err(error) => {
@@ -489,10 +550,40 @@ impl Application {
             .map_err(ApplicationError::Preferences)
     }
 
-    /// The terminal a launch will open in, for the settings sheet.
+    /// The terminals installed here that launches can be sent to.
     #[must_use]
-    pub fn terminal_destination(&self) -> String {
-        self.terminal.destination()
+    pub fn terminal_options(&self) -> Vec<crate::TerminalOption> {
+        self.terminal.available_terminals()
+    }
+
+    /// The name of the terminal the system's default goes to, when it names one.
+    #[must_use]
+    pub fn default_terminal_name(&self) -> Option<String> {
+        self.terminal.default_terminal_name()
+    }
+
+    /// The terminal picked over the system's default, if any.
+    #[must_use]
+    pub fn chosen_terminal(&self) -> Option<String> {
+        self.terminal.chosen_terminal()
+    }
+
+    /// Sends later launches to the terminal `id`, or back to the system's default with `None`,
+    /// and remembers the choice on this machine. The choice takes effect even if it cannot be
+    /// remembered.
+    pub fn choose_terminal(&self, id: Option<&str>) -> Result<(), ApplicationError> {
+        self.terminal.choose_terminal(id);
+        self.preferences
+            .set_terminal(id)
+            .map_err(ApplicationError::Preferences)
+    }
+
+    /// Applies the terminal remembered from an earlier run. A preference that cannot be read
+    /// leaves launches with the system's default, which is where they would go anyway.
+    fn restore_terminal(&self) {
+        if let Ok(Some(id)) = self.preferences.terminal() {
+            self.terminal.choose_terminal(Some(&id));
+        }
     }
 
     pub fn reveal_config(&self) -> Result<(), ApplicationError> {
@@ -511,36 +602,7 @@ impl Application {
             .set_selected_config_path(&document.source_path)
             .map_err(ApplicationError::Preferences)?;
         self.state.load_document(document);
-        self.backfill_agent_defaults();
         Ok(())
-    }
-
-    /// Fills in the built-in agents when a freshly opened config has no Agents section.
-    ///
-    /// This happens in memory and writes nothing. Opening a file is not an edit, and rewriting
-    /// someone's config the moment they open it — bumping its revision, racing another machine
-    /// editing the same shared file — is a poor trade for launchers that work either way. The next
-    /// real edit persists them along with whatever it was.
-    /// The category that holds agents, creating the container if the config has none.
-    ///
-    /// Agents are presented as one flat list, so nothing in the interface asks which group or
-    /// category a new one belongs to. The container still exists — a launcher always lives in a
-    /// subgroup — it is simply never shown.
-    pub fn agent_container(&mut self) -> Result<SubgroupId, ApplicationError> {
-        if let Some(subgroup_id) = self.state.config.agent_container() {
-            return Ok(subgroup_id);
-        }
-        let mut created = None;
-        self.apply_edit(|config| {
-            config.ensure_agent_defaults();
-            created = config.agent_container();
-            Ok(())
-        })?;
-        created.ok_or(ApplicationError::NoConfigSource)
-    }
-
-    fn backfill_agent_defaults(&mut self) {
-        let _ = self.state.config.ensure_agent_defaults();
     }
 
     fn apply_edit(

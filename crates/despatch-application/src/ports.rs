@@ -111,21 +111,85 @@ pub trait LocalPreferences: Send + Sync {
     fn set_appearance(&self, _choice: AppearanceChoice) -> Result<(), PortError> {
         Ok(())
     }
+
+    /// The terminal the user picked for launches, by its [`TerminalOption::id`], or `None` to
+    /// follow the system's default terminal.
+    fn terminal(&self) -> Result<Option<String>, PortError> {
+        Ok(None)
+    }
+
+    /// Remembers the terminal the user picked; `None` goes back to the system's default.
+    fn set_terminal(&self, _terminal: Option<&str>) -> Result<(), PortError> {
+        Ok(())
+    }
+}
+
+/// A terminal launches can be sent to.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TerminalOption {
+    /// What the platform knows the terminal by; on macOS, its bundle identifier.
+    pub id: String,
+    pub name: String,
 }
 
 pub trait TerminalLauncher: Send + Sync {
     fn launch(&self, request: &LaunchRequest) -> Result<(), PortError>;
 
-    /// A human-readable name for the terminal launches will open in, for the settings sheet.
-    ///
-    /// Defaults to the platform's own association, which needs no explanation.
-    fn destination(&self) -> String {
-        "Your default terminal".to_owned()
+    /// The terminals installed on this machine that launches can be sent to.
+    fn available_terminals(&self) -> Vec<TerminalOption> {
+        Vec::new()
     }
+
+    /// The name of the terminal the system's default sends launches to, when it names one.
+    fn default_terminal_name(&self) -> Option<String> {
+        None
+    }
+
+    /// The terminal launches go to, if one was picked over the system's default.
+    fn chosen_terminal(&self) -> Option<String> {
+        None
+    }
+
+    /// Sends later launches to the terminal `id`, or back to the system's default with `None`.
+    fn choose_terminal(&self, _id: Option<&str>) {}
 }
 
 pub trait FileRevealer: Send + Sync {
     fn reveal(&self, path: &Path) -> Result<(), PortError>;
+}
+
+/// One successful launch, remembered on this machine for the "Recently used" list.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct RecentLaunch {
+    pub launcher_id: despatch_domain::LauncherId,
+    pub used_at: std::time::SystemTime,
+}
+
+/// Where the launch history lives.
+///
+/// The history is machine-local usage, like window state: it never enters the shared config,
+/// which another machine may be editing at the same time.
+pub trait RecentLaunches: Send + Sync {
+    /// The remembered launches, newest first. A missing store is an empty history.
+    fn load(&self) -> Result<Vec<RecentLaunch>, PortError>;
+    fn save(&self, recents: &[RecentLaunch]) -> Result<(), PortError>;
+}
+
+/// A history that is kept for the life of the process and never written anywhere.
+///
+/// It is the default, so an application built without a store still behaves — it simply forgets
+/// on quit.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct EphemeralRecentLaunches;
+
+impl RecentLaunches for EphemeralRecentLaunches {
+    fn load(&self) -> Result<Vec<RecentLaunch>, PortError> {
+        Ok(Vec::new())
+    }
+
+    fn save(&self, _recents: &[RecentLaunch]) -> Result<(), PortError> {
+        Ok(())
+    }
 }
 
 /// What to check before a server is saved.
@@ -151,16 +215,6 @@ pub enum Reachability {
     TimedOut,
     /// The hostname does not resolve.
     Unresolved,
-}
-
-/// Finds the program a launcher names, the same way launching it would.
-///
-/// This exists so a launcher can be checked when it is written down rather than when it is first
-/// run: a name that resolves to nothing is a typo, and the moment to say so is while the editor is
-/// still open.
-pub trait ExecutableLocator: Send + Sync {
-    /// The resolved path, or the reason it could not be found.
-    fn locate(&self, executable: &str) -> Result<PathBuf, PortError>;
 }
 
 /// Checks that something is listening where a server says it is.

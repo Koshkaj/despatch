@@ -65,21 +65,6 @@ pub enum AgentProvider {
 }
 
 impl AgentProvider {
-    /// The providers the app can build a launcher for without being told anything else.
-    pub const BUILT_IN: [Self; 4] = [Self::Claude, Self::Codex, Self::Gemini, Self::OpenCode];
-
-    /// How the provider is named in the interface and in a seeded launcher.
-    #[must_use]
-    pub const fn display_name(self) -> &'static str {
-        match self {
-            Self::Codex => "Codex",
-            Self::Claude => "Claude",
-            Self::Gemini => "Gemini",
-            Self::OpenCode => "OpenCode",
-            Self::Custom => "Custom CLI",
-        }
-    }
-
     #[must_use]
     pub const fn default_executable(self) -> Option<&'static str> {
         match self {

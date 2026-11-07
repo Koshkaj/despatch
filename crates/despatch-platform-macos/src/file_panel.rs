@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use objc2_app_kit::{NSModalResponseOK, NSOpenPanel};
+use objc2_app_kit::{NSModalResponseOK, NSOpenPanel, NSSavePanel};
 use objc2_foundation::{MainThreadMarker, NSString, NSURL};
 
 /// What a file panel asks the user to pick.
@@ -35,6 +35,42 @@ pub fn choose_file(request: &FileChoiceRequest) -> Option<PathBuf> {
     panel.setCanChooseDirectories(false);
     panel.setAllowsMultipleSelection(false);
     panel.setShowsHiddenFiles(request.shows_hidden_files);
+    if let Some(directory) = request.directory.as_deref().filter(|path| path.is_dir()) {
+        let url = NSURL::fileURLWithPath(&NSString::from_str(&directory.to_string_lossy()));
+        panel.setDirectoryURL(Some(&url));
+    }
+
+    if panel.runModal() != NSModalResponseOK {
+        return None;
+    }
+    let path = panel.URL()?.path()?;
+    Some(PathBuf::from(path.to_string()))
+}
+
+/// What a save panel asks the user for: where a new file should go.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SavePathRequest {
+    pub title: String,
+    pub prompt: String,
+    /// The directory the panel opens in, when it still exists.
+    pub directory: Option<PathBuf>,
+    /// The file name the panel suggests.
+    pub file_name: String,
+}
+
+/// Runs the system save panel and returns where the user chose to put the file.
+///
+/// The panel confirms replacing an existing file itself. Like [`choose_file`], it is
+/// application-modal, blocks until answered, returns `None` when cancelled, and must run on the
+/// main thread.
+#[must_use]
+pub fn choose_save_path(request: &SavePathRequest) -> Option<PathBuf> {
+    let main_thread = MainThreadMarker::new()?;
+    let panel = NSSavePanel::savePanel(main_thread);
+    panel.setTitle(Some(&NSString::from_str(&request.title)));
+    panel.setPrompt(Some(&NSString::from_str(&request.prompt)));
+    panel.setNameFieldStringValue(&NSString::from_str(&request.file_name));
+    panel.setCanCreateDirectories(true);
     if let Some(directory) = request.directory.as_deref().filter(|path| path.is_dir()) {
         let url = NSURL::fileURLWithPath(&NSString::from_str(&directory.to_string_lossy()));
         panel.setDirectoryURL(Some(&url));

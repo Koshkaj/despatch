@@ -1,4 +1,4 @@
-use objc2_app_kit::{NSColor, NSColorSpace};
+use objc2_app_kit::{NSColor, NSColorSpace, NSWorkspace};
 use objc2_foundation::{NSString, NSUserDefaults};
 
 /// The system-wide appearance settings the Despatch theme derives from.
@@ -8,6 +8,10 @@ pub struct SystemAppearance {
     pub dark: bool,
     /// The user's accent color as linear-free sRGB components in `0.0..=1.0`.
     pub accent: [f32; 3],
+    /// Accessibility → Display → Increase contrast.
+    pub increase_contrast: bool,
+    /// Accessibility → Display → Reduce motion.
+    pub reduce_motion: bool,
 }
 
 /// The macOS default blue accent, used when the accent color cannot be resolved.
@@ -18,19 +22,24 @@ impl Default for SystemAppearance {
         Self {
             dark: false,
             accent: FALLBACK_ACCENT,
+            increase_contrast: false,
+            reduce_motion: false,
         }
     }
 }
 
-/// Reads the current interface style and accent color.
+/// Reads the current interface style, accent color, and the display accessibility settings.
 ///
 /// Falls back to the light appearance and the default blue accent when either value is
 /// unavailable, so the UI always has a usable theme.
 #[must_use]
 pub fn system_appearance() -> SystemAppearance {
+    let workspace = NSWorkspace::sharedWorkspace();
     SystemAppearance {
         dark: prefers_dark_interface(),
         accent: control_accent_color().unwrap_or(FALLBACK_ACCENT),
+        increase_contrast: workspace.accessibilityDisplayShouldIncreaseContrast(),
+        reduce_motion: workspace.accessibilityDisplayShouldReduceMotion(),
     }
 }
 

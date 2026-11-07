@@ -11,8 +11,8 @@ pub use application::Application;
 pub use errors::ApplicationError;
 pub use ports::{
     AppearanceChoice, CommandLaunchRequest, ConfigDocument, ConfigFingerprint, ConfigRepository,
-    ExecutableLocator, FileRevealer, HostProbe, LaunchRequest, LocalPreferences, PortError,
-    PortErrorKind, RawShellLaunchRequest, Reachability, ReachabilityRequest,
-    RepositorySaveExpectation, SshLaunchRequest, TerminalLauncher,
+    EphemeralRecentLaunches, FileRevealer, HostProbe, LaunchRequest, LocalPreferences, PortError,
+    PortErrorKind, RawShellLaunchRequest, Reachability, ReachabilityRequest, RecentLaunch,
+    RecentLaunches, RepositorySaveExpectation, SshLaunchRequest, TerminalLauncher, TerminalOption,
 };
 pub use state::{AppState, ConfigStatus, Dialog, LaunchOutcome, SearchResults};

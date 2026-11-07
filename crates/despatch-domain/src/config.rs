@@ -2,10 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    AgentLauncher, AgentProvider, Group, GroupId, Launcher, LauncherId, Section, Subgroup,
-    SubgroupId, ValidationError,
-};
+use crate::{Group, GroupId, Launcher, LauncherId, Section, Subgroup, SubgroupId, ValidationError};
 
 pub const CURRENT_SCHEMA_VERSION: u32 = 2;
 
@@ -27,75 +24,6 @@ impl Default for AppConfig {
 }
 
 impl AppConfig {
-    /// A config seeded with the agent CLIs the app knows how to run.
-    ///
-    /// A brand-new config with nothing in it makes the Agents section a dead end: the only thing
-    /// on offer is creating a group, which is not what someone opening the app came to do. The
-    /// built-in providers are exactly the launchers this app can construct without being told
-    /// anything, so they are there from the start and can be edited or deleted like any other.
-    #[must_use]
-    pub fn seeded() -> Self {
-        let mut config = Self::default();
-        let _ = config.ensure_agent_defaults();
-        config
-    }
-
-    /// The group holding the built-in agent CLIs, ready to be added to a config.
-    #[must_use]
-    pub fn agent_defaults() -> Option<Group> {
-        let mut group = Group::new("Agents", Section::Agents).ok()?;
-        let mut subgroup = Subgroup::new("Assistants").ok()?;
-        for provider in AgentProvider::BUILT_IN {
-            if let Ok(agent) = AgentLauncher::preset(provider, provider.display_name()) {
-                let _ = subgroup.add_launcher(Section::Agents, Launcher::Agent(agent));
-            }
-        }
-        group.add_subgroup(subgroup).ok()?;
-        Some(group)
-    }
-
-    /// Adds the built-in agents when the Agents section holds nothing at all.
-    ///
-    /// Seeding at creation only helps a config that this app made. An existing one — every config
-    /// that predates the built-ins, including one that has only ever held servers — would show an
-    /// Agents section whose sole offer is "create a group", so it is filled in on load instead.
-    /// Returns whether anything was added.
-    pub fn ensure_agent_defaults(&mut self) -> bool {
-        if self
-            .groups
-            .iter()
-            .any(|group| group.section == Section::Agents)
-        {
-            return false;
-        }
-        let Some(group) = Self::agent_defaults() else {
-            return false;
-        };
-        self.groups.push(group);
-        true
-    }
-
-    /// The subgroup agents are kept in, if the config has one.
-    #[must_use]
-    pub fn agent_container(&self) -> Option<SubgroupId> {
-        self.groups
-            .iter()
-            .find(|group| group.section == Section::Agents)
-            .and_then(|group| group.subgroups.first())
-            .map(|subgroup| subgroup.id)
-    }
-
-    /// Every agent launcher, in the order they appear.
-    ///
-    /// Agents are shown as one flat list, so this crosses whatever groups and categories happen to
-    /// exist rather than reporting them.
-    pub fn agents(&self) -> impl Iterator<Item = &Launcher> {
-        self.groups
-            .iter()
-            .filter(|group| group.section == Section::Agents)
-            .flat_map(Group::launchers)
-    }
-
     pub fn validate(&self) -> Result<(), ValidationError> {
         if self.schema_version != CURRENT_SCHEMA_VERSION {
             return Err(ValidationError::UnsupportedSchemaVersion {

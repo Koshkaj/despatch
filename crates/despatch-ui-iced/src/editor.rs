@@ -1,9 +1,6 @@
-use std::collections::BTreeMap;
-
 use despatch_application::Reachability;
 use despatch_domain::{
-    AgentLauncher, AgentProvider, ColorViolation, CustomCommand, CustomLauncher, GroupId,
-    LabelColor, Launcher, LauncherId, LauncherKind, PathTemplate, Section, SshLauncher, SshPort,
+    ColorViolation, GroupId, LabelColor, Launcher, LauncherId, PathTemplate, SshLauncher, SshPort,
     SubgroupId,
 };
 use iced::widget::text_editor;
@@ -17,11 +14,7 @@ pub enum Field {
     User,
     Port,
     IdentityFile,
-    Executable,
-    WorkingDirectory,
     Args,
-    Env,
-    RawCommand,
 }
 
 /// A validation failure, attached to the field that caused it whenever one can be identified.
@@ -57,7 +50,7 @@ pub enum Target<Id> {
 /// What a [`NameDraft`] is naming.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum NameTarget {
-    NewGroup(Section),
+    NewGroup,
     RenameGroup(GroupId),
     /// A new category inside the given group.
     NewSubgroup(GroupId),
@@ -135,7 +128,7 @@ impl NameDraft {
     #[must_use]
     pub const fn has_color(&self) -> bool {
         match self.target {
-            NameTarget::NewGroup(_) | NameTarget::RenameGroup(_) => true,
+            NameTarget::NewGroup | NameTarget::RenameGroup(_) => true,
             NameTarget::NewSubgroup(_) | NameTarget::RenameSubgroup(_) => false,
         }
     }
@@ -168,7 +161,7 @@ impl NameDraft {
 
     const fn blank_message(&self) -> &'static str {
         match self.target {
-            NameTarget::NewGroup(_) | NameTarget::RenameGroup(_) => "Enter a group name.",
+            NameTarget::NewGroup | NameTarget::RenameGroup(_) => "Enter a group name.",
             NameTarget::NewSubgroup(_) | NameTarget::RenameSubgroup(_) => "Enter a category name.",
         }
     }
@@ -176,8 +169,7 @@ impl NameDraft {
     #[must_use]
     pub const fn title(&self) -> &'static str {
         match self.target {
-            NameTarget::NewGroup(Section::Servers) => "New server group",
-            NameTarget::NewGroup(Section::Agents) => "New agent group",
+            NameTarget::NewGroup => "New server group",
             NameTarget::RenameGroup(_) => "Rename group",
             NameTarget::NewSubgroup(_) => "New category",
             NameTarget::RenameSubgroup(_) => "Rename category",
@@ -187,11 +179,11 @@ impl NameDraft {
     #[must_use]
     pub const fn detail(&self) -> &'static str {
         match self.target {
-            NameTarget::NewGroup(_) | NameTarget::RenameGroup(_) => {
+            NameTarget::NewGroup | NameTarget::RenameGroup(_) => {
                 "Groups sit at the top of a section, such as Production or Staging."
             }
             NameTarget::NewSubgroup(_) | NameTarget::RenameSubgroup(_) => {
-                "Categories split a group into sets like Grafana, Databases, or Relays."
+                "Categories split a group's servers into sets."
             }
         }
     }
@@ -199,15 +191,15 @@ impl NameDraft {
     #[must_use]
     pub const fn placeholder(&self) -> &'static str {
         match self.target {
-            NameTarget::NewGroup(_) | NameTarget::RenameGroup(_) => "Production",
-            NameTarget::NewSubgroup(_) | NameTarget::RenameSubgroup(_) => "Databases",
+            NameTarget::NewGroup | NameTarget::RenameGroup(_) => "Production",
+            NameTarget::NewSubgroup(_) | NameTarget::RenameSubgroup(_) => "Server",
         }
     }
 
     #[must_use]
     pub const fn label(&self) -> &'static str {
         match self.target {
-            NameTarget::NewGroup(_) | NameTarget::RenameGroup(_) => "Group name",
+            NameTarget::NewGroup | NameTarget::RenameGroup(_) => "Group name",
             NameTarget::NewSubgroup(_) | NameTarget::RenameSubgroup(_) => "Category name",
         }
     }
@@ -215,35 +207,33 @@ impl NameDraft {
     #[must_use]
     pub const fn action(&self) -> &'static str {
         match self.target {
-            NameTarget::NewGroup(_) => "Create group",
+            NameTarget::NewGroup => "Create group",
             NameTarget::NewSubgroup(_) => "Create category",
             NameTarget::RenameGroup(_) | NameTarget::RenameSubgroup(_) => "Rename",
         }
     }
 }
 
-/// The launcher editor. One draft covers SSH, built-in agent, and custom CLI launchers so the
-/// create and edit flows share the same validation.
+/// The server editor: one draft for creating and for editing an SSH launcher, so both flows share
+/// the same validation.
 #[derive(Debug)]
 pub struct LauncherDraft {
+    /// The category the launcher is saved into. When it differs from [`Self::origin`] for an
+    /// existing launcher, saving also moves it.
     pub subgroup_id: SubgroupId,
+    /// The category the launcher lived in when the editor opened.
+    pub origin: SubgroupId,
+    /// The categories the editor offers to choose between, in config order. Empty when there is
+    /// nothing to choose.
+    pub categories: Vec<CategoryChoice>,
     pub target: Target<LauncherId>,
-    pub section: Section,
-    pub kind: LauncherKind,
-    pub provider: AgentProvider,
     pub name: String,
     pub host: String,
     pub user: String,
     pub port: String,
     pub identity_file: String,
-    pub executable: String,
-    pub working_directory: String,
-    pub raw_shell: bool,
-    pub raw_command: String,
+    /// Extra `ssh` arguments, one per line.
     pub args: text_editor::Content,
-    /// Environment variables, one `NAME=value` per line, kept as typed so a half-written entry is
-    /// never discarded.
-    pub env: text_editor::Content,
     /// The color override, kept as text so a half-typed hex value is never discarded. Empty means
     /// the launcher follows the color of its group.
     pub color: String,
@@ -252,6 +242,19 @@ pub struct LauncherDraft {
     /// What the last reachability check found, for the host and port it was run against.
     pub reachability: ReachabilityState,
     pub error: Option<FormError>,
+}
+
+/// One category a launcher can be saved into.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CategoryChoice {
+    pub id: SubgroupId,
+    pub name: String,
+}
+
+impl std::fmt::Display for CategoryChoice {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.name)
+    }
 }
 
 /// The state of the reachability check shown under the host field.
@@ -275,97 +278,87 @@ pub enum ReachabilityState {
 }
 
 impl LauncherDraft {
-    /// An empty draft, pre-set to the kind the section accepts.
+    /// An empty server draft.
     #[must_use]
-    pub fn new(subgroup_id: SubgroupId, section: Section) -> Self {
-        let mut draft = Self {
+    pub fn new(subgroup_id: SubgroupId) -> Self {
+        Self {
             subgroup_id,
+            origin: subgroup_id,
+            categories: Vec::new(),
             target: Target::New,
-            section,
-            kind: match section {
-                Section::Servers => LauncherKind::Ssh,
-                Section::Agents => LauncherKind::Agent,
-            },
-            provider: AgentProvider::Codex,
             name: String::new(),
             host: String::new(),
             user: String::new(),
             // Blank means the default port, so a new server only asks for what it really needs.
             port: String::new(),
             identity_file: String::new(),
-            executable: String::new(),
-            working_directory: String::new(),
-            raw_shell: false,
-            raw_command: String::new(),
             args: text_editor::Content::new(),
-            env: text_editor::Content::new(),
             color: String::new(),
             advanced: false,
             reachability: ReachabilityState::Untested,
             error: None,
-        };
-        if section == Section::Agents {
-            draft.select_provider(Some(AgentProvider::Codex));
         }
-        draft
     }
 
-    /// A draft pre-filled from an existing launcher, keeping its identifier.
+    /// Offers `categories` to choose between. One category or none is no choice, and offers nothing.
     #[must_use]
-    pub fn edit(subgroup_id: SubgroupId, section: Section, launcher: &Launcher) -> Self {
-        let mut draft = Self::new(subgroup_id, section);
-        draft.target = Target::Existing(launcher.id());
-        draft.kind = launcher.kind();
-        draft.color = launcher.color().map(LabelColor::to_hex).unwrap_or_default();
-        launcher.name().clone_into(&mut draft.name);
-        match launcher {
-            Launcher::Ssh(ssh) => {
-                draft.host.clone_from(&ssh.host);
-                draft.user.clone_from(&ssh.user);
-                draft.port = if ssh.port == SshPort::DEFAULT {
-                    String::new()
-                } else {
-                    ssh.port.get().to_string()
-                };
-                draft.identity_file = ssh
-                    .identity_file
-                    .as_ref()
-                    .map(|path| path.as_str().to_owned())
-                    .unwrap_or_default();
-                draft.args = args_content(&ssh.extra_args);
-                // A launcher that already uses an additional setting opens with them in view, so
-                // editing never hides a value the user set earlier.
-                draft.advanced = !draft.port.is_empty()
-                    || !draft.identity_file.is_empty()
-                    || !ssh.extra_args.is_empty();
-            }
-            Launcher::Agent(agent) => {
-                draft.provider = agent.provider;
-                draft.executable.clone_from(&agent.executable);
-                draft.working_directory = optional_path(agent.working_directory.as_ref());
-                draft.args = args_content(&agent.args);
-                draft.env = env_content(&agent.env);
-                // Anything already set beyond the preset is shown rather than hidden.
-                draft.advanced = agent.working_directory.is_some()
-                    || !agent.env.is_empty()
-                    || agent.provider.default_executable() != Some(agent.executable.as_str());
-            }
-            Launcher::Custom(custom) => {
-                draft.working_directory = optional_path(custom.working_directory.as_ref());
-                draft.env = env_content(&custom.env);
-                match &custom.command {
-                    CustomCommand::Structured { executable, args } => {
-                        draft.executable.clone_from(executable);
-                        draft.args = args_content(args);
-                    }
-                    CustomCommand::RawShell { command } => {
-                        draft.raw_shell = true;
-                        draft.raw_command.clone_from(command);
-                    }
-                }
-            }
+    pub fn with_categories(mut self, categories: Vec<CategoryChoice>) -> Self {
+        self.categories = if categories.len() > 1 {
+            categories
+        } else {
+            Vec::new()
+        };
+        self
+    }
+
+    /// Saves the launcher into `subgroup_id`, if it is one of the categories on offer.
+    pub fn select_category(&mut self, subgroup_id: SubgroupId) {
+        if self
+            .categories
+            .iter()
+            .any(|choice| choice.id == subgroup_id)
+        {
+            self.subgroup_id = subgroup_id;
         }
-        draft
+    }
+
+    /// The category currently chosen, when the editor offers a choice.
+    #[must_use]
+    pub fn selected_category(&self) -> Option<&CategoryChoice> {
+        self.categories
+            .iter()
+            .find(|choice| choice.id == self.subgroup_id)
+    }
+
+    /// A draft pre-filled from an existing server, keeping its identifier. Only SSH launchers
+    /// can be edited; anything else in an older config is left as it is.
+    #[must_use]
+    pub fn edit(subgroup_id: SubgroupId, launcher: &Launcher) -> Option<Self> {
+        let Launcher::Ssh(ssh) = launcher else {
+            return None;
+        };
+        let mut draft = Self::new(subgroup_id);
+        draft.target = Target::Existing(ssh.id);
+        draft.color = ssh.color.map(LabelColor::to_hex).unwrap_or_default();
+        draft.name.clone_from(&ssh.name);
+        draft.host.clone_from(&ssh.host);
+        draft.user.clone_from(&ssh.user);
+        draft.port = if ssh.port == SshPort::DEFAULT {
+            String::new()
+        } else {
+            ssh.port.get().to_string()
+        };
+        draft.identity_file = ssh
+            .identity_file
+            .as_ref()
+            .map(|path| path.as_str().to_owned())
+            .unwrap_or_default();
+        draft.args = text_editor::Content::with_text(&ssh.extra_args.join("\n"));
+        // A launcher that already uses an additional setting opens with them in view, so editing
+        // never hides a value the user set earlier.
+        draft.advanced =
+            !draft.port.is_empty() || !draft.identity_file.is_empty() || !ssh.extra_args.is_empty();
+        Some(draft)
     }
 
     /// The current text of a single-line field. The multi-line argument list is not one.
@@ -377,12 +370,8 @@ impl LauncherDraft {
             Field::User => &self.user,
             Field::Port => &self.port,
             Field::IdentityFile => &self.identity_file,
-            Field::Executable => &self.executable,
-            Field::WorkingDirectory => &self.working_directory,
-            Field::RawCommand => &self.raw_command,
-            // Neither the arguments nor the environment is a single-line field, and the color is
-            // held as its own text.
-            Field::Args | Field::Env | Field::Color => "",
+            // The arguments are not a single-line field, and the color is held as its own text.
+            Field::Args | Field::Color => "",
         }
     }
 
@@ -394,10 +383,7 @@ impl LauncherDraft {
             Field::User => self.user = value,
             Field::Port => self.port = value,
             Field::IdentityFile => self.identity_file = value,
-            Field::Executable => self.executable = value,
-            Field::WorkingDirectory => self.working_directory = value,
-            Field::RawCommand => self.raw_command = value,
-            Field::Args | Field::Env | Field::Color => return,
+            Field::Args | Field::Color => return,
         }
         self.clear_error(field);
     }
@@ -479,102 +465,9 @@ impl LauncherDraft {
         self.clear_error(Field::Args);
     }
 
-    pub fn edit_env(&mut self, action: text_editor::Action) {
-        self.env.perform(action);
-        self.clear_error(Field::Env);
-    }
-
-    /// Parses the environment block: one `NAME=value` per line, blank lines ignored.
-    ///
-    /// The value keeps everything after the first `=`, so `FLAGS=--a=b` is one entry rather than a
-    /// parse error, and neither side is expanded by a shell.
-    fn parsed_env(&self) -> Result<BTreeMap<String, String>, FormError> {
-        let mut parsed = BTreeMap::new();
-        for line in self.env.text().lines() {
-            let line = line.trim();
-            if line.is_empty() || line.starts_with('#') {
-                continue;
-            }
-            let Some((name, value)) = line.split_once('=') else {
-                return Err(FormError::field(
-                    Field::Env,
-                    format!("'{line}' is not NAME=value."),
-                ));
-            };
-            let name = name.trim();
-            if name.is_empty() {
-                return Err(FormError::field(
-                    Field::Env,
-                    format!("'{line}' has no variable name."),
-                ));
-            }
-            if parsed.insert(name.to_owned(), value.to_owned()).is_some() {
-                return Err(FormError::field(
-                    Field::Env,
-                    format!("{name} is set more than once."),
-                ));
-            }
-        }
-        Ok(parsed)
-    }
-
-    /// Switches between the built-in agent presets and a custom CLI launcher.
-    ///
-    /// Selecting a preset fills in the executable and the suggested name as long as the user has
-    /// not typed their own values, so switching presets never silently discards input.
-    pub fn select_provider(&mut self, provider: Option<AgentProvider>) {
-        let previous_default = self.provider.default_executable().unwrap_or_default();
-        let previous_name = crate::presenters::provider_name(self.provider);
-        if let Some(provider) = provider {
-            self.kind = LauncherKind::Agent;
-            self.provider = provider;
-            if self.executable.trim().is_empty() || self.executable == previous_default {
-                provider
-                    .default_executable()
-                    .unwrap_or_default()
-                    .clone_into(&mut self.executable);
-            }
-            if self.name.trim().is_empty() || self.name == previous_name {
-                crate::presenters::provider_name(provider).clone_into(&mut self.name);
-            }
-        } else {
-            self.kind = LauncherKind::Custom;
-            if self.name == previous_name {
-                self.name.clear();
-            }
-            if self.executable == previous_default {
-                self.executable.clear();
-            }
-        }
-        self.error = None;
-    }
-
-    /// Toggles the explicitly trusted raw-shell mode of a custom launcher.
-    pub fn set_raw_shell(&mut self, raw_shell: bool) {
-        self.raw_shell = raw_shell;
-        self.error = None;
-    }
-
-    /// The provider segment currently selected, or `None` for the custom CLI segment.
-    #[must_use]
-    pub const fn selected_provider(&self) -> Option<AgentProvider> {
-        match self.kind {
-            LauncherKind::Agent => Some(self.provider),
-            LauncherKind::Ssh | LauncherKind::Custom => None,
-        }
-    }
-
     /// Builds a validated launcher, preserving the identifier when editing.
     pub fn build(&self) -> Result<Launcher, FormError> {
-        let launcher = match self.kind {
-            LauncherKind::Ssh => self.build_ssh()?,
-            LauncherKind::Agent => self.build_agent()?,
-            LauncherKind::Custom => self.build_custom()?,
-        };
-        let launcher = match self.target {
-            Target::New => launcher,
-            Target::Existing(launcher_id) => with_id(launcher, launcher_id),
-        };
+        let launcher = self.build_ssh()?;
         launcher
             .validate()
             .map_err(|error| FormError::general(error.to_string()))?;
@@ -583,11 +476,9 @@ impl LauncherDraft {
 
     #[must_use]
     pub const fn title(&self) -> &'static str {
-        match (self.target, self.kind) {
-            (Target::New, LauncherKind::Ssh) => "New server",
-            (Target::New, LauncherKind::Agent | LauncherKind::Custom) => "New agent",
-            (Target::Existing(_), LauncherKind::Ssh) => "Edit server",
-            (Target::Existing(_), LauncherKind::Agent | LauncherKind::Custom) => "Edit agent",
+        match self.target {
+            Target::New => "New server",
+            Target::Existing(_) => "Edit server",
         }
     }
 
@@ -649,67 +540,10 @@ impl LauncherDraft {
         ssh.port = port;
         ssh.identity_file = parse_path(&self.identity_file, Field::IdentityFile, "Identity file")?;
         ssh.extra_args = self.parsed_args();
+        if let Target::Existing(launcher_id) = self.target {
+            ssh.id = launcher_id;
+        }
         Ok(Launcher::Ssh(ssh))
-    }
-
-    fn build_agent(&self) -> Result<Launcher, FormError> {
-        let name = required(&self.name, Field::Name, "Enter a name for this agent.")?;
-        let executable = required(
-            &self.executable,
-            Field::Executable,
-            "Enter the CLI executable to run.",
-        )?;
-
-        let mut agent = AgentLauncher::preset(self.provider, name)
-            .map_err(|error| FormError::field(Field::Name, error.to_string()))?;
-        agent.color = parse_color(&self.color)?;
-        agent.env = self.parsed_env()?;
-        agent.executable = executable;
-        agent.working_directory = parse_path(
-            &self.working_directory,
-            Field::WorkingDirectory,
-            "Working directory",
-        )?;
-        agent.args = self.parsed_args();
-        Ok(Launcher::Agent(agent))
-    }
-
-    fn build_custom(&self) -> Result<Launcher, FormError> {
-        let name = required(&self.name, Field::Name, "Enter a name for this command.")?;
-        let command = if self.raw_shell {
-            let command = self.raw_command.trim();
-            if command.is_empty() {
-                return Err(FormError::field(
-                    Field::RawCommand,
-                    "Enter the shell command to run.",
-                ));
-            }
-            CustomCommand::RawShell {
-                command: command.to_owned(),
-            }
-        } else {
-            CustomCommand::Structured {
-                executable: required(
-                    &self.executable,
-                    Field::Executable,
-                    "Enter the executable to run.",
-                )?,
-                args: self.parsed_args(),
-            }
-        };
-
-        Ok(Launcher::Custom(CustomLauncher {
-            id: LauncherId::new(),
-            name,
-            color: parse_color(&self.color)?,
-            env: self.parsed_env()?,
-            working_directory: parse_path(
-                &self.working_directory,
-                Field::WorkingDirectory,
-                "Working directory",
-            )?,
-            command,
-        }))
     }
 
     /// One argument per non-empty line, kept as separate argv entries rather than one string.
@@ -758,56 +592,15 @@ fn parse_path(
         .map_err(|violation| FormError::field(field, format!("{label} {violation}.")))
 }
 
-fn optional_path(path: Option<&PathTemplate>) -> String {
-    path.map(|path| path.as_str().to_owned())
-        .unwrap_or_default()
-}
-
-fn args_content(args: &[String]) -> text_editor::Content {
-    text_editor::Content::with_text(&args.join("\n"))
-}
-
-fn env_content(env: &BTreeMap<String, String>) -> text_editor::Content {
-    let text: Vec<String> = env
-        .iter()
-        .map(|(name, value)| format!("{name}={value}"))
-        .collect();
-    text_editor::Content::with_text(&text.join("\n"))
-}
-
-fn with_id(launcher: Launcher, launcher_id: LauncherId) -> Launcher {
-    match launcher {
-        Launcher::Ssh(mut ssh) => {
-            ssh.id = launcher_id;
-            Launcher::Ssh(ssh)
-        }
-        Launcher::Agent(mut agent) => {
-            agent.id = launcher_id;
-            Launcher::Agent(agent)
-        }
-        Launcher::Custom(mut custom) => {
-            custom.id = launcher_id;
-            Launcher::Custom(custom)
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use despatch_domain::{
-        AgentLauncher, AgentProvider, CustomCommand, CustomLauncher, GroupId, LabelColor, Launcher,
-        LauncherKind, Section, SshLauncher, SshPort, SubgroupId,
-    };
+    use despatch_domain::{GroupId, LabelColor, Launcher, SshLauncher, SshPort, SubgroupId};
     use iced::widget::text_editor;
 
     use super::{Field, LauncherDraft, NameDraft, NameTarget, Target};
 
     fn server_draft() -> LauncherDraft {
-        LauncherDraft::new(SubgroupId::new(), Section::Servers)
-    }
-
-    fn agent_draft() -> LauncherDraft {
-        LauncherDraft::new(SubgroupId::new(), Section::Agents)
+        LauncherDraft::new(SubgroupId::new())
     }
 
     #[test]
@@ -878,11 +671,8 @@ mod tests {
         assert!(!draft.advanced);
 
         let mut ssh = SshLauncher::new("API", "api.example.com", "deploy").expect("ssh");
-        let plain = LauncherDraft::edit(
-            SubgroupId::new(),
-            Section::Servers,
-            &Launcher::Ssh(ssh.clone()),
-        );
+        let plain =
+            LauncherDraft::edit(SubgroupId::new(), &Launcher::Ssh(ssh.clone())).expect("a server");
         assert!(!plain.advanced, "nothing to reveal on a default connection");
         assert!(
             plain.port.is_empty(),
@@ -891,7 +681,7 @@ mod tests {
 
         ssh.port = SshPort::new(2222).expect("valid port");
         let overridden =
-            LauncherDraft::edit(SubgroupId::new(), Section::Servers, &Launcher::Ssh(ssh));
+            LauncherDraft::edit(SubgroupId::new(), &Launcher::Ssh(ssh)).expect("a server");
         assert!(overridden.advanced, "an override must not be hidden");
         assert_eq!(overridden.port, "2222");
     }
@@ -914,117 +704,13 @@ mod tests {
     }
 
     #[test]
-    fn an_agent_draft_defaults_to_the_selected_preset_executable_and_name() {
-        let draft = agent_draft();
-
-        assert_eq!(draft.kind, LauncherKind::Agent);
-        assert_eq!(draft.provider, AgentProvider::Codex);
-        assert_eq!(draft.executable, "codex");
-        assert_eq!(draft.name, "Codex");
-    }
-
-    #[test]
-    fn switching_presets_updates_untouched_defaults_but_keeps_typed_values() {
-        let mut draft = agent_draft();
-        draft.select_provider(Some(AgentProvider::Claude));
-        assert_eq!(draft.executable, "claude");
-        assert_eq!(draft.name, "Claude");
-
-        draft.set(Field::Name, "Repo assistant".to_owned());
-        draft.set(Field::Executable, "/opt/bin/claude".to_owned());
-        draft.select_provider(Some(AgentProvider::Gemini));
-
-        assert_eq!(draft.provider, AgentProvider::Gemini);
-        assert_eq!(draft.name, "Repo assistant");
-        assert_eq!(draft.executable, "/opt/bin/claude");
-    }
-
-    #[test]
-    fn every_built_in_preset_builds_its_documented_executable() {
-        for (provider, executable) in [
-            (AgentProvider::Codex, "codex"),
-            (AgentProvider::Claude, "claude"),
-            (AgentProvider::Gemini, "gemini"),
-            (AgentProvider::OpenCode, "opencode"),
-        ] {
-            let mut draft = agent_draft();
-            draft.select_provider(Some(provider));
-
-            let Launcher::Agent(agent) = draft.build().expect("valid preset") else {
-                panic!("expected an agent launcher");
-            };
-            assert_eq!(agent.provider, provider);
-            assert_eq!(agent.executable, executable);
-        }
-    }
-
-    #[test]
-    fn the_custom_segment_switches_the_draft_to_a_custom_launcher() {
-        let mut draft = agent_draft();
-        draft.select_provider(None);
-
-        assert_eq!(draft.kind, LauncherKind::Custom);
-        assert_eq!(draft.selected_provider(), None);
-        assert!(draft.name.is_empty());
-        assert!(draft.executable.is_empty());
-
-        draft.set(Field::Name, "Repo shell".to_owned());
-        draft.set(Field::Executable, "zsh".to_owned());
-        draft.set(Field::WorkingDirectory, "$HOME/projects".to_owned());
-        draft.args = text_editor::Content::with_text("-l");
-
-        let Launcher::Custom(custom) = draft.build().expect("valid custom launcher") else {
-            panic!("expected a custom launcher");
-        };
-        assert_eq!(custom.name, "Repo shell");
-        assert_eq!(
-            custom.command,
-            CustomCommand::Structured {
-                executable: "zsh".to_owned(),
-                args: vec!["-l".to_owned()],
-            }
-        );
-    }
-
-    #[test]
-    fn raw_shell_mode_is_never_reached_without_being_explicitly_enabled() {
-        let mut draft = agent_draft();
-        draft.select_provider(None);
-        draft.set(Field::Name, "Deploy".to_owned());
-        draft.set(Field::RawCommand, "make deploy && say done".to_owned());
-
-        // A raw command alone changes nothing: the structured executable is still required.
-        assert_eq!(draft.build().unwrap_err().field, Some(Field::Executable));
-
-        draft.set(Field::Executable, "make".to_owned());
-        let Launcher::Custom(structured) = draft.build().expect("structured build") else {
-            panic!("expected a custom launcher");
-        };
-        assert!(matches!(
-            structured.command,
-            CustomCommand::Structured { .. }
-        ));
-
-        draft.set_raw_shell(true);
-        let Launcher::Custom(raw) = draft.build().expect("raw build") else {
-            panic!("expected a custom launcher");
-        };
-        assert_eq!(
-            raw.command,
-            CustomCommand::RawShell {
-                command: "make deploy && say done".to_owned()
-            }
-        );
-    }
-
-    #[test]
     fn editing_preserves_the_launcher_identifier_and_prefills_every_field() {
         let mut ssh = SshLauncher::new("API", "api.example.com", "deploy").expect("ssh");
         ssh.extra_args = vec!["-v".to_owned()];
         let original = Launcher::Ssh(ssh);
         let subgroup_id = SubgroupId::new();
 
-        let mut draft = LauncherDraft::edit(subgroup_id, Section::Servers, &original);
+        let mut draft = LauncherDraft::edit(subgroup_id, &original).expect("a server");
         assert_eq!(draft.target, Target::Existing(original.id()));
         assert_eq!(draft.host, "api.example.com");
         assert_eq!(draft.args.text().trim_end(), "-v");
@@ -1040,27 +726,8 @@ mod tests {
     }
 
     #[test]
-    fn editing_an_agent_and_a_raw_shell_launcher_round_trips_their_mode() {
-        let subgroup_id = SubgroupId::new();
-        let mut agent = AgentLauncher::preset(AgentProvider::Gemini, "Gemini").expect("agent");
-        agent.args = vec!["--yolo".to_owned()];
-        let draft = LauncherDraft::edit(subgroup_id, Section::Agents, &Launcher::Agent(agent));
-        assert_eq!(draft.selected_provider(), Some(AgentProvider::Gemini));
-        assert_eq!(draft.args.text().trim_end(), "--yolo");
-
-        let mut custom = CustomLauncher::structured("Deploy", "make").expect("custom");
-        custom.command = CustomCommand::RawShell {
-            command: "make deploy".to_owned(),
-        };
-        let draft = LauncherDraft::edit(subgroup_id, Section::Agents, &Launcher::Custom(custom));
-        assert!(draft.raw_shell);
-        assert_eq!(draft.raw_command, "make deploy");
-        assert_eq!(draft.selected_provider(), None);
-    }
-
-    #[test]
     fn a_group_draft_trims_its_name_and_rejects_blank_input() {
-        let mut draft = NameDraft::new(NameTarget::NewGroup(Section::Servers));
+        let mut draft = NameDraft::new(NameTarget::NewGroup);
         assert_eq!(draft.title(), "New server group");
         assert_eq!(draft.build().unwrap_err().field, Some(Field::Name));
 
@@ -1077,14 +744,10 @@ mod tests {
     fn a_rename_draft_starts_from_the_current_name_and_color() {
         let group_id = GroupId::new();
         let color = LabelColor::from_rgb(0x4F, 0x9D, 0xFF);
-        let draft = NameDraft::rename(
-            NameTarget::RenameGroup(group_id),
-            "Local agents",
-            Some(color),
-        );
+        let draft = NameDraft::rename(NameTarget::RenameGroup(group_id), "Home lab", Some(color));
 
         assert_eq!(draft.target, NameTarget::RenameGroup(group_id));
-        assert_eq!(draft.name, "Local agents");
+        assert_eq!(draft.name, "Home lab");
         assert_eq!(draft.selected_color(), Some(color));
         assert_eq!(draft.title(), "Rename group");
         assert_eq!(draft.action(), "Rename");
@@ -1093,7 +756,7 @@ mod tests {
     #[test]
     fn a_swatch_selects_its_color_and_pressing_it_again_clears_it() {
         let color = LabelColor::from_rgb(0x30, 0xD1, 0x58);
-        let mut draft = NameDraft::new(NameTarget::NewGroup(Section::Servers));
+        let mut draft = NameDraft::new(NameTarget::NewGroup);
         draft.set_name("Production".to_owned());
 
         draft.toggle_color(color);
@@ -1106,7 +769,7 @@ mod tests {
 
     #[test]
     fn a_typed_color_is_accepted_as_hex_and_blamed_on_the_color_field_when_it_is_not() {
-        let mut draft = NameDraft::new(NameTarget::NewGroup(Section::Servers));
+        let mut draft = NameDraft::new(NameTarget::NewGroup);
         draft.set_name("Production".to_owned());
 
         draft.set_color("#4f9dff".to_owned());

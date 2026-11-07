@@ -78,20 +78,6 @@ pub trait ExecutableResolver: Send + Sync {
 #[derive(Clone, Copy, Debug, Default)]
 pub struct SystemExecutableResolver;
 
-impl despatch_application::ExecutableLocator for SystemExecutableResolver {
-    fn locate(&self, executable: &str) -> Result<PathBuf, despatch_application::PortError> {
-        // Checked against the same environment a launch would use, so the editor cannot accept a
-        // name that the launcher would then fail to find.
-        self.resolve(executable, Path::new("/"), &EnvironmentVariables::system())
-            .map_err(|error| {
-                despatch_application::PortError::new(
-                    despatch_application::PortErrorKind::NotFound,
-                    error.to_string(),
-                )
-            })
-    }
-}
-
 impl ExecutableResolver for SystemExecutableResolver {
     fn resolve(
         &self,

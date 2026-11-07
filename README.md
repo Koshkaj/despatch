@@ -1,19 +1,21 @@
 <div align="center">
   <img src="apps/despatch/resources/icon.png" alt="" width="128">
   <h1>Despatch</h1>
-  <p><strong>A native macOS launcher for the servers you SSH into and the agent CLIs you run.</strong></p>
+  <p><strong>A native macOS menu-bar launcher for the servers you SSH into.</strong></p>
 </div>
 
-Despatch keeps your SSH connections and agent CLIs in one organised, human-readable JSON file and
-opens any of them in your terminal with a single click. It stores no secrets, and it never owns the
-session it starts — it hands the command to your terminal and gets out of the way.
+Despatch lives in the menu bar. Click its item and a panel drops down with your SSH connections,
+kept in one organised, human-readable JSON file; double-click one and it opens in your
+terminal. It stores no secrets, and it never owns the session it starts — it hands the command to
+your terminal and gets out of the way.
 
-- **Servers** drill down: groups → categories → connections.
-- **Agents** are one flat list. Codex, Claude, Gemini, and OpenCode ship as presets; any other
-  command line can be added.
+- **Servers** are grouped in the sidebar; a group's categories are pills above its list of
+  connections.
 - The config file lives wherever you point it — a synced folder or a git repo, so the same set of
   connections follows you between machines.
-- Machine-local choices (which config file, appearance, window state) stay out of that shared file.
+- **Recently used** lists what you opened last on this Mac, and search reaches everything at once.
+- Machine-local choices (which config file, appearance, terminal, launch history) stay out of that
+  shared file.
 
 ## Install
 
@@ -41,8 +43,10 @@ make dmg     # build the universal release disk image
 make check   # fmt, clippy, and the full test suite
 ```
 
-A bare `cargo run` works but shows neither the app icon nor the app name — both come from the
-surrounding bundle, which is why `make run` builds one first.
+Despatch has no Dock icon and no window of its own: it appears as a terminal symbol in the menu bar
+and opens its panel once at launch. Right-click the item for Settings and Quit, or press ⌘Q while
+the panel is open. A bare `cargo run` works too; the app name and icon come from the surrounding
+bundle, which is why `make run` builds one first.
 
 ## How launching works
 

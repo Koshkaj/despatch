@@ -8,14 +8,13 @@ rust-version.workspace = true
 
 [features]
 # Development-only screenshot harness; never enabled for a release build.
-capture = []
+capture = ["despatch-platform-macos/self-test"]
 
 [dependencies]
 despatch-application = { path = "../despatch-application" }
 despatch-domain = { path = "../despatch-domain" }
 despatch-platform-macos = { path = "../despatch-platform-macos" }
 iced.workspace = true
-png.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]

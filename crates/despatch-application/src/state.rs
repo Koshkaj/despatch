@@ -4,7 +4,7 @@ use despatch_domain::{
     AppConfig, CustomCommand, GroupId, Launcher, LauncherId, Section, SubgroupId,
 };
 
-use crate::{ConfigDocument, ConfigFingerprint, PortError};
+use crate::{ConfigDocument, ConfigFingerprint, PortError, RecentLaunch};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ConfigStatus {
@@ -25,7 +25,6 @@ pub enum Dialog {
     AddLauncher { subgroup_id: SubgroupId },
     EditLauncher { launcher_id: LauncherId },
     DeleteLauncher { launcher_id: LauncherId },
-    Settings,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -60,6 +59,8 @@ pub struct AppState {
     pub dialog: Option<Dialog>,
     pub last_launch: Option<LaunchOutcome>,
     pub last_error: Option<PortError>,
+    /// Launches remembered on this machine, newest first. Never part of the shared config.
+    pub recents: Vec<RecentLaunch>,
 }
 
 impl Default for AppState {
@@ -77,6 +78,7 @@ impl Default for AppState {
             dialog: None,
             last_launch: None,
             last_error: None,
+            recents: Vec::new(),
         }
     }
 }
@@ -136,9 +138,8 @@ impl AppState {
     /// Selects a launcher wherever it lives, opening the group and category that hold it.
     ///
     /// Selection follows the launcher rather than requiring the launcher to be inside whatever is
-    /// already open: the Agents section lists its launchers flat and never opens a category, so a
-    /// rule of "only what the open category holds" left every agent unselectable, and therefore
-    /// unlaunchable.
+    /// already open: "All", search results, and "Recently used" list launchers from categories that
+    /// are not open.
     pub fn select_launcher(&mut self, launcher_id: LauncherId) -> bool {
         let Some((group, subgroup)) = self.config.locate_launcher(launcher_id) else {
             return false;
@@ -158,7 +159,14 @@ impl AppState {
     pub fn search_results(&self) -> SearchResults {
         let query = self.search_query.trim().to_lowercase();
         let mut results = SearchResults::default();
-        for group in &self.config.groups {
+        // Only servers are searched. A config may still hold agent groups from an earlier version;
+        // they are kept in the file but never shown.
+        for group in self
+            .config
+            .groups
+            .iter()
+            .filter(|group| group.section == Section::Servers)
+        {
             let group_matches = query.is_empty() || group.name.to_lowercase().contains(&query);
             let mut group_has_match = group_matches;
             for subgroup in &group.subgroups {

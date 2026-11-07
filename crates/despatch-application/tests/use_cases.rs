@@ -6,8 +6,8 @@ use std::sync::{Arc, Mutex};
 use despatch_application::{
     Application, ApplicationError, CommandLaunchRequest, ConfigDocument, ConfigFingerprint,
     ConfigRepository, ConfigStatus, FileRevealer, HostProbe, LaunchRequest, LocalPreferences,
-    PortError, PortErrorKind, Reachability, ReachabilityRequest, RepositorySaveExpectation,
-    TerminalLauncher,
+    PortError, PortErrorKind, Reachability, ReachabilityRequest, RecentLaunch, RecentLaunches,
+    RepositorySaveExpectation, TerminalLauncher,
 };
 use despatch_domain::{
     AgentLauncher, AgentProvider, AppConfig, Group, Launcher, Section, SshLauncher, Subgroup,
@@ -135,6 +135,7 @@ impl ConfigRepository for FakeRepository {
 #[derive(Default)]
 struct FakePreferences {
     selected_path: Mutex<Option<PathBuf>>,
+    terminal: Mutex<Option<String>>,
 }
 
 impl LocalPreferences for FakePreferences {
@@ -146,11 +147,21 @@ impl LocalPreferences for FakePreferences {
         *self.selected_path.lock().expect("preferences lock") = Some(path.to_owned());
         Ok(())
     }
+
+    fn terminal(&self) -> Result<Option<String>, PortError> {
+        Ok(self.terminal.lock().expect("preferences lock").clone())
+    }
+
+    fn set_terminal(&self, terminal: Option<&str>) -> Result<(), PortError> {
+        *self.terminal.lock().expect("preferences lock") = terminal.map(ToOwned::to_owned);
+        Ok(())
+    }
 }
 
 #[derive(Default)]
 struct FakeTerminal {
     requests: Mutex<Vec<LaunchRequest>>,
+    picked: Mutex<Option<String>>,
 }
 
 impl TerminalLauncher for FakeTerminal {
@@ -160,6 +171,14 @@ impl TerminalLauncher for FakeTerminal {
             .expect("terminal lock")
             .push(request.clone());
         Ok(())
+    }
+
+    fn chosen_terminal(&self) -> Option<String> {
+        self.picked.lock().expect("terminal lock").clone()
+    }
+
+    fn choose_terminal(&self, id: Option<&str>) {
+        *self.picked.lock().expect("terminal lock") = id.map(ToOwned::to_owned);
     }
 }
 
@@ -175,15 +194,6 @@ impl FileRevealer for FakeRevealer {
             .expect("revealer lock")
             .push(path.to_owned());
         Ok(())
-    }
-}
-
-/// The use-case tests accept any program name; resolution is the platform adapter's business.
-struct AnyExecutable;
-
-impl despatch_application::ExecutableLocator for AnyExecutable {
-    fn locate(&self, executable: &str) -> Result<PathBuf, PortError> {
-        Ok(PathBuf::from("/usr/bin").join(executable))
     }
 }
 
@@ -211,10 +221,6 @@ fn harness(config: AppConfig) -> Harness {
     let terminal = Arc::new(FakeTerminal::default());
     let revealer = Arc::new(FakeRevealer::default());
     let path = PathBuf::from("/tmp/despatch-tests/config.json");
-    let seeded_its_own_agents = config
-        .groups
-        .iter()
-        .any(|group| group.section == Section::Agents);
     repository.seed(&path, config);
     let mut app = Application::new(
         repository.clone(),
@@ -222,18 +228,8 @@ fn harness(config: AppConfig) -> Harness {
         terminal.clone(),
         revealer.clone(),
         Arc::new(OfflineProbe),
-        Arc::new(AnyExecutable),
     );
     app.open_config(&path).expect("open seeded config");
-    // Opening a config backfills the built-in agents when it has no Agents section. These tests
-    // are about the use cases rather than the backfill, so a test that asked for no agents keeps
-    // none.
-    if !seeded_its_own_agents {
-        app.state
-            .config
-            .groups
-            .retain(|group| group.section != Section::Agents);
-    }
     Harness {
         app,
         repository,
@@ -262,47 +258,17 @@ fn group_with(name: &str, section: Section, items: Vec<Launcher>) -> Group {
 }
 
 #[test]
-fn a_config_without_agents_gains_the_built_in_ones_on_open_without_being_rewritten() {
-    // A config that predates the built-in agents, or has only ever held servers.
-    let harness = harness(AppConfig {
+fn opening_a_config_adds_nothing_to_it() {
+    let config = AppConfig {
         groups: vec![Group::new("Production", Section::Servers).expect("valid group")],
         ..AppConfig::default()
-    });
-    let repository = harness.repository.clone();
-    let path = harness.path.clone();
-    drop(harness);
+    };
+    let harness = harness(config.clone());
 
-    let mut app = Application::new(
-        repository.clone(),
-        Arc::new(FakePreferences::default()),
-        Arc::new(FakeTerminal::default()),
-        Arc::new(FakeRevealer::default()),
-        Arc::new(OfflineProbe),
-        Arc::new(AnyExecutable),
-    );
-    app.open_config(&path).expect("open config");
-
-    let agents: Vec<&str> = app
-        .state
-        .config
-        .groups
-        .iter()
-        .find(|group| group.section == Section::Agents)
-        .expect("the Agents section is filled in")
-        .subgroups[0]
-        .items
-        .iter()
-        .map(despatch_domain::Launcher::name)
-        .collect();
-    assert_eq!(agents, ["Claude", "Codex", "Gemini", "OpenCode"]);
+    assert_eq!(harness.app.state.config.groups, config.groups);
     assert!(
-        repository.save_calls().is_empty(),
-        "opening a config must not rewrite it"
-    );
-    assert_eq!(
-        app.state.config_status,
-        ConfigStatus::Clean,
-        "and must not look like an unsaved edit"
+        harness.repository.save_calls().is_empty(),
+        "opening is not an edit"
     );
 }
 
@@ -319,20 +285,14 @@ fn first_launch_creates_the_default_config_and_remembers_its_path() {
         terminal,
         revealer,
         Arc::new(OfflineProbe),
-        Arc::new(AnyExecutable),
     );
 
     app.load_startup(path).expect("create default config");
 
-    // A first run is seeded rather than empty: the agent CLIs this app can build a launcher for
-    // are there from the start, so the Agents section is not a dead end.
-    let agents: Vec<&str> = app.state.config.groups[0].subgroups[0]
-        .items
-        .iter()
-        .map(despatch_domain::Launcher::name)
-        .collect();
-    assert_eq!(agents, ["Claude", "Codex", "Gemini", "OpenCode"]);
-    assert_eq!(app.state.config.groups[0].section, Section::Agents);
+    assert!(
+        app.state.config.groups.is_empty(),
+        "a first run starts empty"
+    );
     // Identifiers are minted per config, so the shape is what is asserted, not equality.
     assert_eq!(
         app.state.config.schema_version,
@@ -343,11 +303,6 @@ fn first_launch_creates_the_default_config_and_remembers_its_path() {
     let calls = repository.save_calls();
     assert_eq!(calls.len(), 1);
     assert_eq!(calls[0].path, path);
-    assert_eq!(
-        calls[0].config.groups[0].subgroups[0].items.len(),
-        4,
-        "the seeded launchers are written, not just held in memory"
-    );
     assert_eq!(
         preferences.selected_config_path().expect("read preference"),
         Some(path.to_owned())
@@ -693,5 +648,232 @@ fn successful_open_updates_local_selected_path() {
             .selected_config_path()
             .expect("selected path"),
         Some(harness.path)
+    );
+}
+
+// ---------------------------------------------------------------- recently used
+
+#[derive(Default)]
+struct FakeRecents {
+    saved: Mutex<Vec<Vec<RecentLaunch>>>,
+    stored: Mutex<Vec<RecentLaunch>>,
+    fail: Mutex<bool>,
+}
+
+impl RecentLaunches for FakeRecents {
+    fn load(&self) -> Result<Vec<RecentLaunch>, PortError> {
+        Ok(self.stored.lock().expect("recents lock").clone())
+    }
+
+    fn save(&self, recents: &[RecentLaunch]) -> Result<(), PortError> {
+        if *self.fail.lock().expect("recents lock") {
+            return Err(PortError::new(PortErrorKind::PermissionDenied, "read-only"));
+        }
+        self.saved
+            .lock()
+            .expect("recents lock")
+            .push(recents.to_vec());
+        *self.stored.lock().expect("recents lock") = recents.to_vec();
+        Ok(())
+    }
+}
+
+struct RefusingTerminal;
+
+impl TerminalLauncher for RefusingTerminal {
+    fn launch(&self, _request: &LaunchRequest) -> Result<(), PortError> {
+        Err(PortError::new(PortErrorKind::Unavailable, "no terminal"))
+    }
+}
+
+/// A harness whose launches are remembered in `recents`, over three servers in one category.
+fn recents_harness(recents: Arc<FakeRecents>) -> (Harness, Vec<despatch_domain::LauncherId>) {
+    let servers = group_with(
+        "Production",
+        Section::Servers,
+        vec![ssh("Primary"), ssh("Replica"), ssh("Bastion")],
+    );
+    let ids = servers.subgroups[0]
+        .items
+        .iter()
+        .map(Launcher::id)
+        .collect();
+    let mut harness = harness(AppConfig {
+        groups: vec![servers],
+        ..AppConfig::default()
+    });
+    harness.app = harness.app.clone().with_recents(recents);
+    (harness, ids)
+}
+
+fn launch(harness: &mut Harness, launcher_id: despatch_domain::LauncherId) {
+    assert!(harness.app.state.select_launcher(launcher_id));
+    harness.app.launch_selected().expect("launch");
+}
+
+#[test]
+fn a_successful_launch_is_remembered_newest_first_without_duplicates() {
+    let recents = Arc::new(FakeRecents::default());
+    let (mut harness, ids) = recents_harness(recents.clone());
+
+    launch(&mut harness, ids[0]);
+    launch(&mut harness, ids[1]);
+    launch(&mut harness, ids[0]);
+
+    let remembered: Vec<_> = harness
+        .app
+        .recent_launches()
+        .iter()
+        .map(|recent| recent.launcher_id)
+        .collect();
+    assert_eq!(remembered, vec![ids[0], ids[1]]);
+    assert_eq!(recents.saved.lock().expect("recents lock").len(), 3);
+    // The history is machine-local: launching never writes the shared config.
+    assert!(harness.repository.save_calls().is_empty());
+}
+
+#[test]
+fn a_failed_launch_is_not_remembered() {
+    let recents = Arc::new(FakeRecents::default());
+    let (harness, ids) = recents_harness(recents.clone());
+    let mut app = Application::new(
+        harness.repository.clone(),
+        harness.preferences.clone(),
+        Arc::new(RefusingTerminal),
+        harness.revealer.clone(),
+        Arc::new(OfflineProbe),
+    )
+    .with_recents(recents.clone());
+    app.open_config(&harness.path).expect("open config");
+    assert!(app.state.select_launcher(ids[0]));
+
+    assert!(app.launch_selected().is_err());
+
+    assert!(app.recent_launches().is_empty());
+    assert!(recents.saved.lock().expect("recents lock").is_empty());
+}
+
+#[test]
+fn a_history_that_cannot_be_written_never_fails_the_launch() {
+    let recents = Arc::new(FakeRecents::default());
+    *recents.fail.lock().expect("recents lock") = true;
+    let (mut harness, ids) = recents_harness(recents);
+    assert!(harness.app.state.select_launcher(ids[0]));
+
+    harness
+        .app
+        .launch_selected()
+        .expect("the launch still succeeds");
+
+    assert_eq!(
+        harness
+            .terminal
+            .requests
+            .lock()
+            .expect("terminal lock")
+            .len(),
+        1
+    );
+    assert_eq!(harness.app.recent_launches().len(), 1);
+    assert!(
+        harness
+            .app
+            .state
+            .last_error
+            .as_ref()
+            .is_some_and(|error| error.message().contains("Recently used"))
+    );
+}
+
+#[test]
+fn launches_of_launchers_that_no_longer_exist_are_not_listed() {
+    let recents = Arc::new(FakeRecents::default());
+    let stranger = despatch_domain::LauncherId::new();
+    recents
+        .stored
+        .lock()
+        .expect("recents lock")
+        .push(RecentLaunch {
+            launcher_id: stranger,
+            used_at: std::time::SystemTime::UNIX_EPOCH,
+        });
+    let (mut harness, ids) = recents_harness(recents.clone());
+    assert!(harness.app.recent_launches().is_empty());
+
+    launch(&mut harness, ids[2]);
+
+    // The stranger is dropped from the store on the next write, not just hidden.
+    let stored = recents.stored.lock().expect("recents lock").clone();
+    assert_eq!(stored.len(), 1);
+    assert_eq!(stored[0].launcher_id, ids[2]);
+}
+
+#[test]
+fn the_history_is_capped_and_can_be_cleared() {
+    let recents = Arc::new(FakeRecents::default());
+    let mut items = Vec::new();
+    for index in 0..(Application::RECENT_LIMIT + 3) {
+        items.push(ssh(&format!("Server {index}")));
+    }
+    let servers = group_with("Fleet", Section::Servers, items);
+    let ids: Vec<_> = servers.subgroups[0]
+        .items
+        .iter()
+        .map(Launcher::id)
+        .collect();
+    let mut harness = harness(AppConfig {
+        groups: vec![servers],
+        ..AppConfig::default()
+    });
+    harness.app = harness.app.clone().with_recents(recents.clone());
+    for launcher_id in &ids {
+        launch(&mut harness, *launcher_id);
+    }
+
+    let remembered = harness.app.recent_launches();
+    assert_eq!(remembered.len(), Application::RECENT_LIMIT);
+    assert_eq!(remembered[0].launcher_id, *ids.last().expect("a launcher"));
+
+    harness.app.clear_recents().expect("clear");
+    assert!(harness.app.recent_launches().is_empty());
+    assert!(recents.stored.lock().expect("recents lock").is_empty());
+}
+
+#[test]
+fn a_picked_terminal_takes_effect_and_is_remembered_on_this_machine() {
+    let harness = harness(AppConfig::default());
+
+    harness
+        .app
+        .choose_terminal(Some("com.apple.Terminal"))
+        .expect("pick a terminal");
+
+    assert_eq!(
+        harness.app.chosen_terminal().as_deref(),
+        Some("com.apple.Terminal")
+    );
+    assert_eq!(
+        harness.preferences.terminal().expect("read").as_deref(),
+        Some("com.apple.Terminal")
+    );
+    harness.app.choose_terminal(None).expect("back to default");
+    assert_eq!(harness.app.chosen_terminal(), None);
+    assert_eq!(harness.preferences.terminal().expect("read"), None);
+}
+
+#[test]
+fn the_remembered_terminal_is_applied_at_startup() {
+    let mut harness = harness(AppConfig::default());
+    harness
+        .preferences
+        .set_terminal(Some("com.mitchellh.ghostty"))
+        .expect("remember a terminal");
+
+    let path = harness.path.clone();
+    harness.app.load_startup(&path).expect("start up");
+
+    assert_eq!(
+        harness.terminal.chosen_terminal().as_deref(),
+        Some("com.mitchellh.ghostty")
     );
 }

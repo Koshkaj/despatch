@@ -34,6 +34,12 @@ plutil -lint "$plist" >/dev/null
     exit 1
 }
 
+# Despatch lives in the menu bar: no Dock icon, no app menu of its own.
+[[ "$(plutil -extract LSUIElement raw "$plist")" == "true" ]] || {
+    echo "the bundle must declare LSUIElement so the app stays out of the Dock" >&2
+    exit 1
+}
+
 codesign --verify --deep --strict --verbose=2 "$bundle_dir"
 
 # Checked with `lipo` rather than `file` because a release bundle is universal, and `file` reports

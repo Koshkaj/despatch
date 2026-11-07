@@ -147,7 +147,7 @@ fn selecting_a_subgroup_also_opens_its_group_and_section() {
 }
 
 #[test]
-fn search_is_case_insensitive_across_names_hosts_providers_and_arguments() {
+fn search_is_case_insensitive_across_names_and_hosts() {
     let mut state = state_with_groups();
 
     state.set_search_query("API.EXAMPLE");
@@ -157,20 +157,22 @@ fn search_is_case_insensitive_across_names_hosts_providers_and_arguments() {
         state.config.groups[0].subgroups[0].items[0].id()
     );
 
-    state.set_search_query("CODEX");
-    assert_eq!(state.search_results().launcher_ids.len(), 1);
-    assert_eq!(
-        state.search_results().launcher_ids[0],
-        state.config.groups[1].subgroups[0].items[0].id()
-    );
-
-    state.set_search_query("release");
-    assert_eq!(state.search_results().launcher_ids.len(), 1);
-
-    state.set_search_query("project TOOLS");
+    state.set_search_query("production");
     let results = state.search_results();
-    assert_eq!(results.group_ids, vec![state.config.groups[1].id]);
+    assert_eq!(results.group_ids, vec![state.config.groups[0].id]);
     assert_eq!(results.launcher_ids.len(), 1);
+}
+
+#[test]
+fn agents_left_in_an_older_config_are_never_found() {
+    let mut state = state_with_groups();
+
+    for query in ["CODEX", "release", "project TOOLS", "Assistant"] {
+        state.set_search_query(query);
+        let results = state.search_results();
+        assert!(results.launcher_ids.is_empty(), "{query} found an agent");
+        assert!(results.group_ids.is_empty(), "{query} found an agent group");
+    }
 }
 
 #[test]
@@ -180,6 +182,10 @@ fn searching_a_subgroup_name_matches_every_launcher_it_holds() {
     state.set_search_query("GENERAL");
     let results = state.search_results();
 
-    assert_eq!(results.subgroup_ids.len(), 2);
-    assert_eq!(results.launcher_ids.len(), 2);
+    assert_eq!(
+        results.subgroup_ids.len(),
+        1,
+        "only the server group's category"
+    );
+    assert_eq!(results.launcher_ids.len(), 1);
 }

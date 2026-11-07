@@ -31,7 +31,6 @@ iced = { version = "=0.14.0", default-features = false, features = [
 ] }
 objc2 = "0.6.4"
 objc2-app-kit = { version = "0.3.2", default-features = false }
-png = "0.17.16"
 objc2-foundation = { version = "0.3.2", default-features = false, features = ["alloc", "NSUserDefaults", "NSString", "NSURL"] }
 rustix = { version = "1.1.4", features = ["process"] }
 tempfile = "3.23.0"
@@ -51,6 +50,12 @@ pedantic = { level = "deny", priority = -1 }
 codegen-units = 1
 lto = "thin"
 strip = "symbols"
+
+# Proc-macro crates are loaded by the compiler as dynamic libraries, and stripping their symbols
+# leaves nothing for it to load: on current toolchains a release build then fails with "can't find
+# crate for `thiserror_impl`". Only the shipped binary needs stripping.
+[profile.release.build-override]
+strip = false
 
 # Dependencies are optimized even in a debug build. The renderer and the text shaper run on every
 # frame, and unoptimized they cost enough per frame that dragging a card lags behind the pointer —
