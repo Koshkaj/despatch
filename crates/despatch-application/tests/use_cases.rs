@@ -5,9 +5,9 @@ use std::sync::{Arc, Mutex};
 
 use despatch_application::{
     Application, ApplicationError, CommandLaunchRequest, ConfigDocument, ConfigFingerprint,
-    ConfigRepository, ConfigStatus, FileRevealer, HostProbe, LaunchRequest, LocalPreferences,
-    PortError, PortErrorKind, Reachability, ReachabilityRequest, RecentLaunch, RecentLaunches,
-    RepositorySaveExpectation, TerminalLauncher,
+    ConfigRepository, ConfigStatus, ExternalChange, FileRevealer, HostProbe, LaunchRequest,
+    LocalPreferences, PortError, PortErrorKind, Reachability, ReachabilityRequest, RecentLaunch,
+    RecentLaunches, RepositorySaveExpectation, TerminalLauncher,
 };
 use despatch_domain::{
     AgentLauncher, AgentProvider, AppConfig, Group, Launcher, Section, SshLauncher, Subgroup,
@@ -44,6 +44,22 @@ impl FakeRepository {
                     config,
                     source_path: path.to_owned(),
                     fingerprint: ConfigFingerprint::new("seed").expect("valid fingerprint"),
+                },
+            );
+    }
+
+    /// Replaces the file as another program would, leaving a fingerprint the app has not seen.
+    fn edit_externally(&self, path: &Path, config: AppConfig) {
+        self.state
+            .lock()
+            .expect("repository lock")
+            .documents
+            .insert(
+                path.to_owned(),
+                ConfigDocument {
+                    config,
+                    source_path: path.to_owned(),
+                    fingerprint: ConfigFingerprint::new("external").expect("valid fingerprint"),
                 },
             );
     }
@@ -422,6 +438,72 @@ fn repository_failure_keeps_the_edited_state_dirty_and_recoverable() {
     assert_eq!(harness.repository.save_calls().len(), 1);
     harness.app.save_current().expect("retry save");
     assert_eq!(harness.app.state.config_status, ConfigStatus::Clean);
+}
+
+#[test]
+fn a_config_file_nobody_else_touched_is_left_alone() {
+    let mut harness = harness(AppConfig::default());
+    harness
+        .app
+        .add_group("Production", Section::Servers)
+        .expect("add group");
+
+    assert_eq!(
+        harness.app.check_config_file().expect("check"),
+        ExternalChange::None,
+        "the app's own save is not an outside edit"
+    );
+    assert_eq!(harness.app.state.config_status, ConfigStatus::Clean);
+}
+
+#[test]
+fn an_edit_made_outside_the_app_is_loaded_when_nothing_here_is_unsaved() {
+    let mut harness = harness(AppConfig::default());
+    let mut edited = AppConfig::default();
+    edited.groups.push(group_with(
+        "Infraforge",
+        Section::Servers,
+        vec![ssh("alpha")],
+    ));
+    harness.repository.edit_externally(&harness.path, edited);
+
+    assert_eq!(
+        harness.app.check_config_file().expect("check"),
+        ExternalChange::Reloaded
+    );
+    assert_eq!(harness.app.state.config.groups[0].name, "Infraforge");
+    assert_eq!(harness.app.state.config_status, ConfigStatus::Clean);
+    assert!(
+        harness.repository.save_calls().is_empty(),
+        "nothing written"
+    );
+}
+
+#[test]
+fn an_edit_made_outside_the_app_over_an_unsaved_change_is_a_conflict() {
+    let mut harness = harness(AppConfig::default());
+    harness
+        .repository
+        .fail_next_save(PortError::new(PortErrorKind::Other, "disk full"));
+    assert!(
+        harness
+            .app
+            .add_group("Local edit", Section::Servers)
+            .is_err()
+    );
+    harness
+        .repository
+        .edit_externally(&harness.path, AppConfig::default());
+
+    assert_eq!(
+        harness.app.check_config_file().expect("check"),
+        ExternalChange::Conflict
+    );
+    assert_eq!(harness.app.state.config_status, ConfigStatus::Conflict);
+    assert_eq!(
+        harness.app.state.config.groups[0].name, "Local edit",
+        "the unsaved change is kept"
+    );
 }
 
 #[test]

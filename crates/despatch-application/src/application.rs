@@ -200,6 +200,39 @@ impl Application {
         Ok(())
     }
 
+    /// Looks at the config file on disk and takes in an edit made outside the app.
+    ///
+    /// Every change made here is saved at once and its fingerprint kept, so a file whose
+    /// fingerprint differs was changed by something else: a sync service, a `git pull`, an editor.
+    /// With nothing unsaved here it is loaded; with an unsaved change it is a conflict, and neither
+    /// side is overwritten. The file is only decoded once its fingerprint has changed.
+    pub fn check_config_file(&mut self) -> Result<ExternalChange, ApplicationError> {
+        let Some(path) = self.state.source_path.clone() else {
+            return Ok(ExternalChange::None);
+        };
+        let current = self
+            .repository
+            .fingerprint(&path)
+            .map_err(ApplicationError::Repository)?;
+        if self.state.fingerprint.as_ref() == Some(&current) {
+            return Ok(ExternalChange::None);
+        }
+        match self.state.config_status {
+            ConfigStatus::Clean | ConfigStatus::Unloaded => {
+                let document = self
+                    .repository
+                    .load(&path)
+                    .map_err(ApplicationError::Repository)?;
+                self.state.load_document(document);
+                Ok(ExternalChange::Reloaded)
+            }
+            ConfigStatus::Dirty | ConfigStatus::Conflict => {
+                self.state.config_status = ConfigStatus::Conflict;
+                Ok(ExternalChange::Conflict)
+            }
+        }
+    }
+
     pub fn save_current(&mut self) -> Result<(), ApplicationError> {
         let path = self
             .state
@@ -696,4 +729,16 @@ fn launch_request(launcher: &Launcher, config_directory: PathBuf) -> LaunchReque
             }),
         },
     }
+}
+
+/// What a look at the config file on disk found.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ExternalChange {
+    /// The file is what the app last loaded or saved.
+    None,
+    /// The file was changed outside the app and, with nothing unsaved here, has been loaded.
+    Reloaded,
+    /// The file was changed outside the app while a change here is unsaved; nothing was
+    /// overwritten, and the config is in conflict until the user reloads or saves a copy.
+    Conflict,
 }

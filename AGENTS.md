@@ -139,7 +139,9 @@ Interaction requirements:
 - Selection, hover, focus, disabled, empty, loading, success, and error states must all exist.
 - Sheets open above the panel behind a scrim that follows the panel's rounded corners.
 - Motion is limited to useful state feedback and must respect reduced-motion preferences.
-- The list pane and rows are solid semantic surfaces for readability.
+- The panel is glass: a system material stands behind it, and the chrome and list pane only tint
+  it, the pane more strongly so rows read against a calmer ground. Reduce Transparency paints both
+  solid.
 - Keyboard navigation and VoiceOver labels are required, not optional polish.
 - Shortcuts: Command-N adds an item, Command-Shift-N adds a group, Command-F focuses search,
   Command-comma opens Settings, Command-1…9 jumps to a group, ←/→ change the segment, ↑/↓ move
@@ -493,6 +495,14 @@ Persistence requirements:
 - Keep a recoverable backup before a schema migration.
 - Detect external changes. Reload automatically when there are no unsaved local edits; otherwise
   show a conflict state with Reload and Save Copy actions.
+  `Application::check_config_file` does this: it asks the repository for the file's fingerprint
+  (a hash of its bytes, nothing decoded) and only loads the file when that differs from the one the
+  app last loaded or saved — every change made in the app is saved at once and its fingerprint
+  kept, so the app's own saves never look external. The panel checks when it opens and every
+  `CONFIG_CHECK_INTERVAL` (2 s) while it stays open, never while hidden, and never while a row or
+  group is being carried. Polling a small file is used rather than file-system events because it
+  behaves the same in sync folders and on network volumes, where those events are unreliable. A
+  file that cannot be read is reported once, not on every check.
 - Use a revision plus a content fingerprint to avoid silently overwriting a newer shared file.
 - Debounce filesystem events and self-generated save notifications.
 - Never silently reset a corrupt or future-version config to an empty config.
@@ -519,8 +529,11 @@ There are three ways a command reaches a terminal, and the terminal decides whic
 - **Through Ghostty's scripting API.** Ghostty deliberately shows “Allow Ghostty to execute …” for
   every executable supplied through its `-e` startup option, so it must never be added to
   `ARGV_TERMINALS`. Ghostty 1.3 and later expose an AppleScript surface API protected by a one-time
-  macOS Automation permission, and it opens a window **in the Ghostty already running** — the argv
-  path goes through `open -n`, which starts a second copy of the whole application per launch.
+  macOS Automation permission, and it opens the session **in the Ghostty already running** — as a new
+  tab in its front window, like Cmd-T, or as a new window when Ghostty has none open or is only
+  being started (a starting Ghostty opens its own default window, and a tab beside it would leave a
+  stray shell). The argv path goes through `open -n`, which starts a second copy of the whole
+  application per launch.
   Nothing is staged on disk: the command, `initial working directory`, `environment variables`, and
   `wait after command` are properties of the surface, so Ghostty exports the variables itself and
   holds the window when a command fails. Launcher values reach `osascript` as arguments, never
@@ -584,8 +597,8 @@ shell startup and can put a permission prompt on screen for it. `TerminalTraits`
 only reviewed switches that turn those behaviours off. A terminal with no such switches is handed
 nothing: guessing a flag is worse than the extra window.
 
-Ghostty 1.3's AppleScript surface API reuses the running application and opens a new window. It is
-the only implemented reuse path. Do not replace it with `-e` (which restores the per-launch
+Ghostty 1.3's AppleScript surface API reuses the running application and opens a new tab in its
+front window (a new window when it has none). It is the only implemented reuse path. Do not replace it with `-e` (which restores the per-launch
 confirmation) or synthesised keystrokes (which need Accessibility permission and race focus).
 
 Terminal.app and iTerm2 *can* be driven with Apple Events (`do script`, `create window`), which
@@ -719,6 +732,14 @@ meaning from strings.
 - **Open at login** is a Settings switch over `SMAppService.mainApp`, reached through the
   Objective-C runtime (`login_item.rs`). It only works from the app bundle; outside one the switch
   is disabled and says so, and a registration waiting for approval says where to approve it.
+- **Glass**: `configure_panel` puts a system material behind the interface — Liquid Glass
+  (`NSGlassEffectView`) from macOS 26, the popover `NSVisualEffectView` before — in the window's
+  frame view, directly below winit's content view. winit requires its view to stay the content view,
+  so the material cannot wrap it; below it, Iced's translucent pixels composite over the material and
+  the content view still receives every click. The window's appearance is set to the interface's
+  light or dark, so the glass and native menus match a theme pinned in Settings. The ground and pane
+  colors are translucent tints (`theme::ground`, `theme::pane`); Reduce Transparency travels in the
+  theme's name, like Increase Contrast, and makes them solid.
 - **Motion**: the panel fades in over 120 ms on `NSWindow`'s animator, and simply appears when the
   system asks to reduce motion. Hiding is immediate.
 - **Increase Contrast** selects a separate theme (the setting travels in the theme's name, since an

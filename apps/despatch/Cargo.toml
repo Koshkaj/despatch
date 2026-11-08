@@ -1,6 +1,6 @@
 [package]
 name = "despatch"
-version = "0.1.0"
+version = "0.2.0"
 description = "Native macOS utility for organizing server and CLI connections"
 edition.workspace = true
 license.workspace = true

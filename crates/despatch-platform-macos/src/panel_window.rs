@@ -11,12 +11,17 @@
 use std::ffi::c_void;
 use std::ptr::NonNull;
 
-use objc2::MainThreadMarker;
+use objc2::rc::Retained;
+use objc2::runtime::{AnyClass, AnyObject};
+use objc2::{MainThreadMarker, MainThreadOnly, msg_send};
 use objc2_app_kit::{
-    NSAnimatablePropertyContainer, NSAnimationContext, NSApplication,
-    NSApplicationActivationPolicy, NSView, NSWindow, NSWindowCollectionBehavior,
+    NSAnimatablePropertyContainer, NSAnimationContext, NSAppearance, NSAppearanceCustomization,
+    NSAppearanceNameAqua, NSAppearanceNameDarkAqua, NSApplication, NSApplicationActivationPolicy,
+    NSAutoresizingMaskOptions, NSGlassEffectView, NSUserInterfaceItemIdentification, NSView,
+    NSVisualEffectBlendingMode, NSVisualEffectMaterial, NSVisualEffectState, NSVisualEffectView,
+    NSWindow, NSWindowCollectionBehavior, NSWindowOrderingMode,
 };
-use objc2_foundation::{NSPoint, NSRect};
+use objc2_foundation::{NSPoint, NSRect, NSString};
 
 /// A rectangle on screen, in `AppKit` screen coordinates.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -113,9 +118,10 @@ pub fn use_accessory_activation_policy() {
 /// Gives the panel window the behaviour of a menu-bar panel.
 ///
 /// It joins every Space and floats over full-screen apps, so it opens where the user is rather than
-/// switching Spaces to wherever it was last shown; it stays out of the window cycle and Exposé; and
-/// it carries the system shadow, which is computed from the panel's own rounded shape.
-pub fn configure_panel(ns_view: NonNull<c_void>) -> Result<(), String> {
+/// switching Spaces to wherever it was last shown; it stays out of the window cycle and Exposé; it
+/// carries the system shadow, which is computed from the panel's own rounded shape; and it stands
+/// on a glass backdrop that the interface draws over (see [`install_backdrop`]).
+pub fn configure_panel(ns_view: NonNull<c_void>, dark: bool) -> Result<(), String> {
     let window = window_of(ns_view)?;
     window.setCollectionBehavior(
         NSWindowCollectionBehavior::CanJoinAllSpaces
@@ -124,6 +130,98 @@ pub fn configure_panel(ns_view: NonNull<c_void>) -> Result<(), String> {
             | NSWindowCollectionBehavior::IgnoresCycle,
     );
     window.setHasShadow(true);
+    install_backdrop(&window)?;
+    set_appearance(&window, dark);
+    Ok(())
+}
+
+/// Gives the panel window the light or dark appearance the interface is drawn in, so the glass
+/// behind it — and every native menu opened from it — matches, including when the user has pinned
+/// one in Settings against the system's.
+pub fn set_panel_appearance(ns_view: NonNull<c_void>, dark: bool) -> Result<(), String> {
+    let window = window_of(ns_view)?;
+    set_appearance(&window, dark);
+    Ok(())
+}
+
+fn set_appearance(window: &NSWindow, dark: bool) {
+    // SAFETY: Both names are immutable AppKit constants.
+    let name = unsafe {
+        if dark {
+            NSAppearanceNameDarkAqua
+        } else {
+            NSAppearanceNameAqua
+        }
+    };
+    window.setAppearance(NSAppearance::appearanceNamed(name).as_deref());
+}
+
+/// The corner radius of the glass, matching the panel the interface draws over it.
+const PANEL_CORNER_RADIUS: f64 = 12.0;
+
+/// Names the backdrop among the frame view's subviews, so it is only ever installed once.
+const BACKDROP_IDENTIFIER: &str = "com.despatch.panel-backdrop";
+
+/// Puts a system material behind the interface, so the panel is glass rather than paint.
+///
+/// From macOS 26 this is Liquid Glass (`NSGlassEffectView`); before that it is the popover
+/// material of `NSVisualEffectView`. Both follow Reduce Transparency by themselves.
+///
+/// Iced draws into a Metal layer inside winit's view, and winit requires that view to stay the
+/// window's content view, so the material cannot wrap it. It goes into the window's frame view
+/// instead, directly below the content view: the interface's translucent pixels composite over it,
+/// and the content view, which covers the whole window, still receives every click.
+fn install_backdrop(window: &NSWindow) -> Result<(), String> {
+    let main_thread = MainThreadMarker::new().ok_or("not on the main thread")?;
+    let content = window
+        .contentView()
+        .ok_or("the panel window has no content view")?;
+    // SAFETY: The content view's superview is the window's frame view, which the window owns and
+    // keeps alive while it is open; this runs on the main thread (checked above).
+    let frame_view = unsafe { content.superview() }.ok_or("the content view has no frame view")?;
+    let identifier = NSString::from_str(BACKDROP_IDENTIFIER);
+    let subviews = frame_view.subviews();
+    let installed = (0..subviews.count()).any(|index| {
+        subviews
+            .objectAtIndex(index)
+            .identifier()
+            .is_some_and(|id| *id == *identifier)
+    });
+    if installed {
+        return Ok(());
+    }
+    let frame = content.frame();
+    let backdrop: Retained<NSView> = if AnyClass::get(c"NSGlassEffectView").is_some() {
+        let glass = NSGlassEffectView::initWithFrame(NSGlassEffectView::alloc(main_thread), frame);
+        glass.setCornerRadius(PANEL_CORNER_RADIUS);
+        Retained::into_super(glass)
+    } else {
+        let material =
+            NSVisualEffectView::initWithFrame(NSVisualEffectView::alloc(main_thread), frame);
+        material.setMaterial(NSVisualEffectMaterial::Popover);
+        material.setBlendingMode(NSVisualEffectBlendingMode::BehindWindow);
+        material.setState(NSVisualEffectState::Active);
+        material.setWantsLayer(true);
+        // SAFETY: A view that wants a layer has one, and `cornerRadius`/`masksToBounds` are
+        // CALayer properties of the documented types; main thread (checked above).
+        unsafe {
+            let layer: Option<Retained<AnyObject>> = msg_send![&*material, layer];
+            if let Some(layer) = layer {
+                let () = msg_send![&*layer, setCornerRadius: PANEL_CORNER_RADIUS];
+                let () = msg_send![&*layer, setMasksToBounds: true];
+            }
+        }
+        Retained::into_super(material)
+    };
+    backdrop.setIdentifier(Some(&identifier));
+    backdrop.setAutoresizingMask(
+        NSAutoresizingMaskOptions::ViewWidthSizable | NSAutoresizingMaskOptions::ViewHeightSizable,
+    );
+    frame_view.addSubview_positioned_relativeTo(
+        &backdrop,
+        NSWindowOrderingMode::Below,
+        Some(&content),
+    );
     Ok(())
 }
 

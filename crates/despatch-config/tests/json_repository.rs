@@ -32,6 +32,35 @@ fn the_current_fixture_round_trips_byte_stably_after_canonical_formatting() {
 }
 
 #[test]
+fn fingerprinting_a_config_reads_it_without_decoding_or_backing_it_up() {
+    let directory = tempdir().expect("temp dir");
+    let path = directory.path().join("config.json");
+    fs::write(
+        &path,
+        fs::read(fixture("config-v1.json")).expect("read fixture"),
+    )
+    .expect("seed a legacy config");
+
+    let repository = JsonConfigRepository;
+    let fingerprint = ConfigRepository::fingerprint(&repository, &path).expect("fingerprint");
+
+    assert!(
+        !directory
+            .path()
+            .join(format!("config.json.{BACKUP_EXTENSION}"))
+            .exists(),
+        "a check every few seconds must not touch the backup"
+    );
+    assert_eq!(
+        fingerprint,
+        ConfigRepository::load(&repository, &path)
+            .expect("load")
+            .fingerprint,
+        "the check and a load agree on what the file is"
+    );
+}
+
+#[test]
 fn a_v1_config_is_migrated_into_one_subgroup_per_group_and_backed_up() {
     let directory = tempdir().expect("temp dir");
     let path = directory.path().join("config.json");

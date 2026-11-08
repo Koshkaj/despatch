@@ -42,6 +42,13 @@ pub enum RepositorySaveExpectation {
 pub trait ConfigRepository: Send + Sync {
     fn load(&self, path: &Path) -> Result<ConfigDocument, PortError>;
 
+    /// The fingerprint of the file as it is on disk now, without decoding it — what the app asks
+    /// for every few seconds to notice an edit made outside it. Loading may do more than read
+    /// (an old schema keeps a backup), so a repository that can fingerprint cheaply should.
+    fn fingerprint(&self, path: &Path) -> Result<ConfigFingerprint, PortError> {
+        self.load(path).map(|document| document.fingerprint)
+    }
+
     fn save(
         &self,
         path: &Path,

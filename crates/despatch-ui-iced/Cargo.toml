@@ -16,10 +16,11 @@ despatch-domain = { path = "../despatch-domain" }
 despatch-platform-macos = { path = "../despatch-platform-macos" }
 iced.workspace = true
 thiserror.workspace = true
+# Already in the build through Iced's text stack; read directly to measure labels for an ellipsis.
+ttf-parser.workspace = true
 
 [dev-dependencies]
 iced_test = "0.14"
-ttf-parser.workspace = true
 
 [lints]
 workspace = true

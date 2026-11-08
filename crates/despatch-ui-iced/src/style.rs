@@ -99,10 +99,10 @@ pub fn disclosure(theme: &Theme, status: button::Status) -> button::Style {
 /// The panel itself: one rounded surface hanging from the menu bar.
 ///
 /// The window around it is transparent, so these corners are the panel's real shape, and the system
-/// shadow is computed from them.
+/// shadow is computed from them. Behind it stands the system's glass, which its ground only tints.
 pub fn panel(theme: &Theme) -> container::Style {
     container::Style {
-        background: Some(Background::Color(theme.palette().background)),
+        background: Some(Background::Color(theme::ground(theme))),
         text_color: Some(label(theme)),
         border: Border {
             radius: PANEL_RADIUS.into(),
@@ -120,7 +120,7 @@ pub fn panel(theme: &Theme) -> container::Style {
 /// The corner radius of the panel, shared by everything that has to follow its outline.
 pub const PANEL_RADIUS: f32 = 12.0;
 
-/// The list pane: a solid content surface, a step off the chrome around it.
+/// The list pane: the content surface, a step off the chrome around it.
 pub fn pane(theme: &Theme) -> container::Style {
     container::Style {
         background: Some(Background::Color(theme::pane(theme))),

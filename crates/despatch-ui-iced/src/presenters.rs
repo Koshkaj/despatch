@@ -318,18 +318,78 @@ pub(crate) const ADVANCE: f32 = 0.6;
 
 /// Shortens `text` to what fits in `width` points at `size`, ending with an ellipsis.
 ///
-/// Iced has no ellipsis mode, so the budget is computed from [`ADVANCE`].
+/// Iced has no ellipsis mode, so the text is measured here, glyph by glyph, with the advances of
+/// the installed system font. [`ADVANCE`] is deliberately wider than real text, which is right for
+/// sizing a control but would cut a name that fits; it is only used for characters the font table
+/// does not cover, or when the font cannot be read.
 #[must_use]
 pub fn ellipsize(text: &str, width: f32, size: f32) -> String {
-    let budget = budget(width, size);
-    if budget < 2 {
-        return "…".to_owned();
-    }
-    if text.chars().count() <= budget {
+    let measure = |character: char| advance(character) * size;
+    if text.chars().map(measure).sum::<f32>() <= width {
         return text.to_owned();
     }
-    let kept: String = text.chars().take(budget - 1).collect();
-    format!("{}…", kept.trim_end())
+    let mut used = measure('…');
+    let mut kept = String::new();
+    for character in text.chars() {
+        used += measure(character);
+        if used > width {
+            break;
+        }
+        kept.push(character);
+    }
+    let kept = kept.trim_end();
+    if kept.is_empty() {
+        return "…".to_owned();
+    }
+    format!("{kept}…")
+}
+
+/// The advance of `character`, in ems, as the system font sets it, with room for the heavier
+/// weights the interface also uses.
+fn advance(character: char) -> f32 {
+    /// Medium and Semibold run a few percent wider than the default instance the table is read
+    /// from, and kerning is not applied.
+    const WEIGHT_ALLOWANCE: f32 = 1.06;
+    let measured = measured_advances().and_then(|table| {
+        if character == '…' {
+            return Some(table.ellipsis);
+        }
+        let index = usize::try_from(u32::from(character)).ok()?;
+        table.advances.get(index).copied().flatten()
+    });
+    measured.map_or(ADVANCE, |width| width * WEIGHT_ALLOWANCE)
+}
+
+/// Advances, in ems, read once from the system font for the characters labels are mostly made of.
+struct AdvanceTable {
+    /// Indexed by code point, Basic Latin through Latin Extended-B.
+    advances: Vec<Option<f32>>,
+    ellipsis: f32,
+}
+
+fn measured_advances() -> Option<&'static AdvanceTable> {
+    /// Basic Latin through Latin Extended-B: most names, hosts, and paths.
+    const MEASURED: u32 = 0x250;
+    static TABLE: std::sync::OnceLock<Option<AdvanceTable>> = std::sync::OnceLock::new();
+    TABLE
+        .get_or_init(|| {
+            // Only the table is kept: the font file itself is several megabytes.
+            let bytes = std::fs::read(crate::typography::SYSTEM_FONT_PATH).ok()?;
+            let face = ttf_parser::Face::parse(&bytes, 0).ok()?;
+            let em = f32::from(face.units_per_em());
+            let advance = |character: char| {
+                face.glyph_index(character)
+                    .and_then(|glyph| face.glyph_hor_advance(glyph))
+                    .map(|units| f32::from(units) / em)
+            };
+            Some(AdvanceTable {
+                advances: (0..MEASURED)
+                    .map(|code| char::from_u32(code).and_then(advance))
+                    .collect(),
+                ellipsis: advance('…')?,
+            })
+        })
+        .as_ref()
 }
 
 /// Estimates how wide `text` renders at `size`, for laying out content-sized controls.
@@ -340,18 +400,6 @@ pub fn ellipsize(text: &str, width: f32, size: f32) -> String {
 )]
 pub fn text_width(text: &str, size: f32) -> f32 {
     text.chars().count() as f32 * size * ADVANCE
-}
-
-#[expect(
-    clippy::cast_possible_truncation,
-    clippy::cast_sign_loss,
-    reason = "a character budget is a small non-negative count by construction"
-)]
-fn budget(width: f32, size: f32) -> usize {
-    if width <= 0.0 || size <= 0.0 {
-        return 0;
-    }
-    (width / (size * ADVANCE)).floor().max(0.0) as usize
 }
 
 /// How many of the segments measured in `widths` fit in `available` before an overflow menu has to
@@ -477,8 +525,8 @@ mod tests {
     };
 
     use super::{
-        Destination, ellipsize, fitting_segments, footer_rows, launcher_count, list_rows,
-        pane_heading, relative_time, segments, sidebar_groups, subgroup_count, text_width,
+        Destination, advance, ellipsize, fitting_segments, footer_rows, launcher_count, list_rows,
+        pane_heading, relative_time, segments, sidebar_groups, subgroup_count,
     };
 
     fn ssh(name: &str, host: &str) -> Launcher {
@@ -743,7 +791,17 @@ mod tests {
         let shortened = ellipsize("a-very-long-host-name.example.com", 80.0, 13.0);
 
         assert!(shortened.ends_with('…'));
-        assert!(text_width(&shortened, 13.0) <= 80.0 + 13.0);
+        let width: f32 = shortened
+            .chars()
+            .map(|character| advance(character) * 13.0)
+            .sum();
+        assert!(width <= 80.0, "the shortened label is {width} points wide");
+    }
+
+    #[test]
+    fn a_group_name_that_fits_beside_the_hover_actions_is_not_shortened() {
+        // About 66 points wide in the system font; the 0.6 em estimate would call it 78.
+        assert_eq!(ellipsize("Production", 76.0, 13.0), "Production");
     }
 
     #[test]

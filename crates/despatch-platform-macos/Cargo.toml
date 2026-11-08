@@ -22,7 +22,7 @@ thiserror.workspace = true
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2.workspace = true
 objc2-core-graphics = { version = "0.3.2", default-features = false, features = ["std", "CGImage", "CGWindow"], optional = true }
-objc2-app-kit = { workspace = true, features = ["NSAccessibility", "NSAccessibilityConstants", "NSAccessibilityElement", "NSAccessibilityProtocols", "NSAnimation", "NSAnimationContext", "NSApplication", "NSBitmapImageRep", "NSButton", "NSCell", "NSColor", "NSColorSpace", "NSControl", "NSEvent", "NSFontDescriptor", "NSGraphics", "objc2-core-foundation", "NSGraphicsContext", "NSImage", "NSImageRep", "NSMenu", "NSMenuItem", "NSOpenPanel", "NSPanel", "NSResponder", "NSRunningApplication", "NSSavePanel", "NSScreen", "NSStatusBar", "NSStatusBarButton", "NSStatusItem", "NSView", "NSWindow", "NSWorkspace"] }
+objc2-app-kit = { workspace = true, features = ["NSAccessibility", "NSAccessibilityConstants", "NSAccessibilityElement", "NSAccessibilityProtocols", "NSAnimation", "NSAnimationContext", "NSAppearance", "NSApplication", "NSBitmapImageRep", "NSButton", "NSCell", "NSColor", "NSColorSpace", "NSControl", "NSEvent", "NSFontDescriptor", "NSGlassEffectView", "NSGraphics", "objc2-core-foundation", "NSGraphicsContext", "NSImage", "NSImageRep", "NSMenu", "NSMenuItem", "NSOpenPanel", "NSPanel", "NSResponder", "NSRunningApplication", "NSSavePanel", "NSScreen", "NSStatusBar", "NSStatusBarButton", "NSStatusItem", "NSUserInterfaceItemIdentification", "NSView", "NSVisualEffectView", "NSWindow", "NSWorkspace"] }
 objc2-foundation = { workspace = true, features = ["NSArray", "NSDictionary", "NSError", "NSGeometry", "NSNotification", "NSObject", "NSString"] }
 
 [dev-dependencies]

@@ -1,4 +1,9 @@
-//! Opening a Ghostty window through Ghostty's own macOS scripting API.
+//! Opening a session in Ghostty through Ghostty's own macOS scripting API.
+//!
+//! A Ghostty that is already running with a window open gets a new **tab** in its front window —
+//! what Cmd-T does there. A Ghostty that is not running, or has no window, gets a new window: one
+//! that is only being started opens its own default window, and a tab beside that would leave a
+//! plain shell next to the session the user asked for.
 //!
 //! The alternative is `open -n -b … --args -e <argv…>`, which starts a *second copy of the whole
 //! application* for every launch — Ghostty gains an entry in the Dock and in Cmd-Tab each time — and
@@ -35,6 +40,7 @@ if (count of argv) > 2 then
 else
   set launch_environment to {}
 end if
+set already_running to application id "com.mitchellh.ghostty" is running
 tell application id "com.mitchellh.ghostty"
   set cfg to new surface configuration
   set command of cfg to launch_command
@@ -45,7 +51,11 @@ tell application id "com.mitchellh.ghostty"
     set environment variables of cfg to launch_environment
   end if
   set wait after command of cfg to true
-  new window with configuration cfg
+  if already_running and (count of windows) > 0 then
+    new tab in front window with configuration cfg
+  else
+    new window with configuration cfg
+  end if
   activate
 end tell
 end run"#;
@@ -147,6 +157,15 @@ mod tests {
             shell: PathBuf::from("/bin/zsh"),
             payload,
         }
+    }
+
+    /// A running Ghostty is given a tab in the window in front, like Cmd-T; only a Ghostty with no
+    /// window to put it in — including one this launch starts — is given a window.
+    #[test]
+    fn a_running_ghostty_gets_a_tab_in_its_front_window() {
+        assert!(LAUNCH_SCRIPT.contains("is running"));
+        assert!(LAUNCH_SCRIPT.contains("new tab in front window with configuration cfg"));
+        assert!(LAUNCH_SCRIPT.contains("new window with configuration cfg"));
     }
 
     #[test]

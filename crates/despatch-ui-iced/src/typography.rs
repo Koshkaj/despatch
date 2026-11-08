@@ -8,6 +8,9 @@ use iced::font::{Family, Weight};
 /// the weights below select positions on its weight axis rather than separate files.
 pub const FAMILY: &str = "System Font";
 
+/// Where that font is installed, read to measure labels for an ellipsis.
+pub(crate) const SYSTEM_FONT_PATH: &str = "/System/Library/Fonts/SFNS.ttf";
+
 pub const UI: Font = Font {
     family: Family::Name(FAMILY),
     ..Font::DEFAULT
@@ -27,10 +30,8 @@ pub const SEMIBOLD: Font = Font {
 mod tests {
     use super::FAMILY;
 
-    const SYSTEM_FONT: &str = "/System/Library/Fonts/SFNS.ttf";
-
     fn system_font() -> Option<Vec<u8>> {
-        std::fs::read(SYSTEM_FONT).ok()
+        std::fs::read(super::SYSTEM_FONT_PATH).ok()
     }
 
     /// The family the font database will file the system font under: the typographic family when

@@ -19,6 +19,12 @@ impl ConfigRepository for JsonConfigRepository {
         })
     }
 
+    fn fingerprint(&self, path: &Path) -> Result<ConfigFingerprint, PortError> {
+        Self::fingerprint(path)
+            .map(|current| fingerprint(current.to_string()))
+            .map_err(|error| port_error(&error))
+    }
+
     fn save(
         &self,
         path: &Path,

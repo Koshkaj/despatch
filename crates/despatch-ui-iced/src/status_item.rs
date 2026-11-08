@@ -187,16 +187,32 @@ impl MenuBar {
     }
 }
 
-/// Gives the panel window its menu-bar behaviour: every Space, over full-screen apps, a shadow.
-pub fn configure(window_id: window::Id) -> Task<Result<(), String>> {
-    on_view(window_id, |view| {
+/// Gives the panel window its menu-bar behaviour — every Space, over full-screen apps, a shadow —
+/// and the glass it stands on, in the light or dark appearance the interface is drawn in.
+pub fn configure(window_id: window::Id, dark: bool) -> Task<Result<(), String>> {
+    on_view(window_id, move |view| {
         #[cfg(target_os = "macos")]
         {
-            despatch_platform_macos::configure_panel(view)
+            despatch_platform_macos::configure_panel(view, dark)
         }
         #[cfg(not(target_os = "macos"))]
         {
-            let _ = view;
+            let _ = (view, dark);
+            Ok(())
+        }
+    })
+}
+
+/// Turns the glass behind the panel, and its native menus, light or dark to match the interface.
+pub fn set_appearance(window_id: window::Id, dark: bool) -> Task<Result<(), String>> {
+    on_view(window_id, move |view| {
+        #[cfg(target_os = "macos")]
+        {
+            despatch_platform_macos::set_panel_appearance(view, dark)
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = (view, dark);
             Ok(())
         }
     })

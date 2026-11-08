@@ -9,6 +9,10 @@ use iced::{Color, Theme, color};
 
 /// The macOS appearance the theme was built from.
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "each is an independent system setting, read and passed on as macOS reports it"
+)]
 pub struct Appearance {
     pub dark: bool,
     /// The user's system accent color, which selection and focus are drawn in.
@@ -17,6 +21,9 @@ pub struct Appearance {
     pub increase_contrast: bool,
     /// Accessibility → Display → Reduce motion: the panel appears without fading in.
     pub reduce_motion: bool,
+    /// Accessibility → Display → Reduce transparency: the panel is painted solid instead of
+    /// letting the glass behind it show through.
+    pub reduce_transparency: bool,
 }
 
 impl Default for Appearance {
@@ -26,6 +33,7 @@ impl Default for Appearance {
             accent: SYSTEM_BLUE,
             increase_contrast: false,
             reduce_motion: false,
+            reduce_transparency: false,
         }
     }
 }
@@ -73,6 +81,7 @@ impl Appearance {
                 accent: Color::from_rgb(red, green, blue),
                 increase_contrast: system.increase_contrast,
                 reduce_motion: system.reduce_motion,
+                reduce_transparency: system.reduce_transparency,
             }
         }
         #[cfg(not(target_os = "macos"))]
@@ -109,28 +118,39 @@ impl Appearance {
                 color!(0xD70015)
             },
         };
-        let name = match (self.dark, self.increase_contrast) {
-            (false, false) => "Despatch Light",
-            (true, false) => "Despatch Dark",
-            (false, true) => LIGHT_INCREASED_CONTRAST,
-            (true, true) => DARK_INCREASED_CONTRAST,
-        };
+        let mut name = String::from(if self.dark {
+            "Despatch Dark"
+        } else {
+            "Despatch Light"
+        });
+        if self.increase_contrast {
+            name.push_str(INCREASED_CONTRAST);
+        }
+        if self.reduce_transparency {
+            name.push_str(SOLID);
+        }
         Theme::custom(name, palette)
     }
 }
 
-const LIGHT_INCREASED_CONTRAST: &str = "Despatch Light, Increased Contrast";
-const DARK_INCREASED_CONTRAST: &str = "Despatch Dark, Increased Contrast";
+const INCREASED_CONTRAST: &str = ", Increased Contrast";
+const SOLID: &str = ", Solid";
 
 /// Reports whether `theme` was built for Increase Contrast.
 ///
 /// An Iced theme carries a palette and a name and nothing else, so the setting travels in the
-/// name: the two contrast themes are distinct themes, which is also what makes Iced redraw when the
+/// name: the contrast themes are distinct themes, which is also what makes Iced redraw when the
 /// setting changes.
 #[must_use]
 pub fn increased_contrast(theme: &Theme) -> bool {
-    let name = theme.to_string();
-    name == LIGHT_INCREASED_CONTRAST || name == DARK_INCREASED_CONTRAST
+    theme.to_string().contains(INCREASED_CONTRAST)
+}
+
+/// Reports whether the panel's surfaces let the glass behind them show through: always, unless the
+/// user asked the system to reduce transparency. Carried in the theme's name, like contrast.
+#[must_use]
+pub fn glass(theme: &Theme) -> bool {
+    !theme.to_string().contains(SOLID)
 }
 
 /// Reports whether `theme` uses a dark background, so surfaces know which way to elevate.
@@ -143,13 +163,30 @@ pub fn is_dark(theme: &Theme) -> bool {
         < 0.5
 }
 
-/// The list pane: the content surface, solid, so rows read against it rather than the material.
+/// The list pane: the content surface, a step off the chrome around it.
+///
+/// Over glass it is a wash — brighter in light mode, deeper in dark — so the glass still shows
+/// through while rows read against a calmer ground than the chrome. With Reduce Transparency it is
+/// solid.
 #[must_use]
 pub fn pane(theme: &Theme) -> Color {
-    if is_dark(theme) {
-        DARK_PANE
+    match (is_dark(theme), glass(theme)) {
+        (true, true) => with_alpha(DARK_PANE, 0.42),
+        (false, true) => with_alpha(LIGHT_PANE, 0.55),
+        (true, false) => DARK_PANE,
+        (false, false) => LIGHT_PANE,
+    }
+}
+
+/// The panel's ground — header, sidebar, and footer. Over glass it only tints the material, so the
+/// desktop behind shows through, softened; with Reduce Transparency it is the solid chrome color.
+#[must_use]
+pub fn ground(theme: &Theme) -> Color {
+    let solid = theme.palette().background;
+    if glass(theme) {
+        with_alpha(solid, if is_dark(theme) { 0.30 } else { 0.25 })
     } else {
-        LIGHT_PANE
+        solid
     }
 }
 
@@ -240,8 +277,8 @@ mod tests {
     use iced::Color;
 
     use super::{
-        Appearance, accent, increased_contrast, is_dark, label_secondary, label_tertiary, pane,
-        raised, separator,
+        Appearance, accent, glass, ground, increased_contrast, is_dark, label_secondary,
+        label_tertiary, pane, raised, separator,
     };
 
     fn appearance(dark: bool) -> Appearance {
@@ -316,6 +353,24 @@ mod tests {
                     > contrast_against(separator(&normal), pane(&normal)),
                 "a hairline must stand out more against the pane"
             );
+        }
+    }
+
+    #[test]
+    fn reduce_transparency_paints_the_panel_solid_instead_of_tinting_the_glass() {
+        for dark in [false, true] {
+            let glass_theme = appearance(dark).theme();
+            let solid_theme = Appearance {
+                reduce_transparency: true,
+                ..appearance(dark)
+            }
+            .theme();
+
+            assert!(glass(&glass_theme) && !glass(&solid_theme));
+            assert!(ground(&glass_theme).a < 1.0 && pane(&glass_theme).a < 1.0);
+            assert!((ground(&solid_theme).a - 1.0).abs() < f32::EPSILON);
+            assert!((pane(&solid_theme).a - 1.0).abs() < f32::EPSILON);
+            assert_eq!(is_dark(&glass_theme), is_dark(&solid_theme));
         }
     }
 

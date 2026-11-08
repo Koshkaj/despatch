@@ -79,7 +79,7 @@ pub use login_item::{LoginItemStatus, login_item_status, set_open_at_login};
 #[cfg(target_os = "macos")]
 pub use panel_window::{
     FADE_SECONDS, PANEL_GAP, ScreenRect, StatusAnchor, configure_panel, hide_panel, panel_top_left,
-    refresh_panel_shadow, show_panel, use_accessory_activation_policy,
+    refresh_panel_shadow, set_panel_appearance, show_panel, use_accessory_activation_policy,
 };
 #[cfg(all(target_os = "macos", feature = "self-test"))]
 pub use self_test::{

@@ -7,7 +7,7 @@ mod errors;
 mod ports;
 mod state;
 
-pub use application::Application;
+pub use application::{Application, ExternalChange};
 pub use errors::ApplicationError;
 pub use ports::{
     AppearanceChoice, CommandLaunchRequest, ConfigDocument, ConfigFingerprint, ConfigRepository,

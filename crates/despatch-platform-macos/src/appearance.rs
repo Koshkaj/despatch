@@ -3,6 +3,10 @@ use objc2_foundation::{NSString, NSUserDefaults};
 
 /// The system-wide appearance settings the Despatch theme derives from.
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "each is an independent system setting, read and passed on as macOS reports it"
+)]
 pub struct SystemAppearance {
     /// Whether macOS is currently using the dark interface style.
     pub dark: bool,
@@ -12,6 +16,8 @@ pub struct SystemAppearance {
     pub increase_contrast: bool,
     /// Accessibility → Display → Reduce motion.
     pub reduce_motion: bool,
+    /// Accessibility → Display → Reduce transparency.
+    pub reduce_transparency: bool,
 }
 
 /// The macOS default blue accent, used when the accent color cannot be resolved.
@@ -24,6 +30,7 @@ impl Default for SystemAppearance {
             accent: FALLBACK_ACCENT,
             increase_contrast: false,
             reduce_motion: false,
+            reduce_transparency: false,
         }
     }
 }
@@ -40,6 +47,7 @@ pub fn system_appearance() -> SystemAppearance {
         accent: control_accent_color().unwrap_or(FALLBACK_ACCENT),
         increase_contrast: workspace.accessibilityDisplayShouldIncreaseContrast(),
         reduce_motion: workspace.accessibilityDisplayShouldReduceMotion(),
+        reduce_transparency: workspace.accessibilityDisplayShouldReduceTransparency(),
     }
 }
 

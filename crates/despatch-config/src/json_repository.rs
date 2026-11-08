@@ -69,6 +69,17 @@ impl JsonConfigRepository {
         })
     }
 
+    /// The fingerprint of the file's current contents. Only reads; nothing is decoded or backed up.
+    pub fn fingerprint(path: impl AsRef<Path>) -> Result<ContentFingerprint, ConfigError> {
+        let path = path.as_ref();
+        fs::read(path)
+            .map(|contents| ContentFingerprint::of(&contents))
+            .map_err(|source| ConfigError::Read {
+                path: path.to_owned(),
+                source,
+            })
+    }
+
     pub fn encode(config: &AppConfig) -> Result<Vec<u8>, ConfigError> {
         config
             .validate()

@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, Instant, SystemTime};
 
 use despatch_application::{AppearanceChoice, Application, Dialog, Reachability};
 use despatch_domain::{
@@ -116,6 +116,10 @@ pub struct AppShell {
     pub pinned: bool,
     /// Whether the panel is on screen.
     pub panel_visible: bool,
+    /// When the app losing activation last hid the panel. A click on the menu-bar item can take
+    /// activation away before the click itself arrives, so a toggle soon after this closes, not
+    /// reopens.
+    deactivated_at: Option<Instant>,
     /// Whether the user asked the system to reduce motion; the panel then appears without fading.
     pub reduce_motion: bool,
     /// Whether Despatch opens at login, once the system has been asked.
@@ -129,6 +133,12 @@ pub struct AppShell {
     status_token: u64,
     /// What the status line is showing, used only to notice when it becomes something else.
     status_fingerprint: Option<String>,
+    /// Identifies the current run of config-file checks; a check from an earlier showing of the
+    /// panel finds a newer token and stops, so only one run is ever going.
+    config_check: u64,
+    /// The last failure to read the config file, so a check that keeps failing the same way says
+    /// so once rather than every few seconds.
+    config_check_error: Option<String>,
     theme: Theme,
     accessibility_nodes: Vec<Node>,
     /// The tree last sent to the window, so an unchanged one is not sent again.
@@ -180,12 +190,15 @@ impl AppShell {
             remembered_segments: HashMap::new(),
             pinned: false,
             panel_visible: false,
+            deactivated_at: None,
             reduce_motion: appearance.reduce_motion,
             open_at_login: None,
             terminals: Vec::new(),
             menu_bar: MenuBar::default(),
             status_token: 0,
             status_fingerprint: None,
+            config_check: 0,
+            config_check_error: None,
             theme,
             accessibility_nodes: Vec::new(),
             installed_accessibility: None,
@@ -381,6 +394,9 @@ pub enum Message {
     PanelCommand(Result<(), String>),
     /// The panel has drawn since it was shown; its shadow can follow its shape now.
     RefreshShadow,
+    /// Time to look at the config file for an edit made outside the app. Carries the token of the
+    /// run of checks it belongs to.
+    CheckConfigFile(u64),
 
     Shortcut(Shortcut),
     WindowOpened(iced::window::Id),
@@ -420,9 +436,20 @@ const STATUS_LIFETIME: Duration = Duration::from_secs(10);
 /// How long a new menu-bar item takes to be given its place in the menu bar.
 const MENU_BAR_SETTLE: Duration = Duration::from_millis(300);
 
+/// How often the open panel looks at its config file for an edit made outside the app. A check
+/// reads and hashes the file and nothing more, and none run while the panel is hidden: opening it
+/// checks at once.
+const CONFIG_CHECK_INTERVAL: Duration = Duration::from_secs(2);
+
 /// How long after showing the panel its shadow is recomputed: long enough for the GPU to have
 /// presented the first frame, short enough that nobody sees the panel without one.
 const SHADOW_SETTLE: Duration = Duration::from_millis(90);
+
+/// How soon after a deactivation a click on the menu-bar item still counts as the click that
+/// caused it. From macOS 27 the item lives in another process (`MenuBarAgent`), and pressing it
+/// sometimes deactivates Despatch 10–20 ms before the press is delivered; a slow frame can stretch
+/// that. A person cannot click somewhere else and then on the item this quickly.
+const ITEM_CLICK_DEACTIVATION: Duration = Duration::from_millis(400);
 
 pub fn update(shell: &mut AppShell, message: Message) -> Task<Message> {
     let task = apply(shell, message);
@@ -790,7 +817,7 @@ fn apply(shell: &mut AppShell, message: Message) -> Task<Message> {
         }
         Message::SaveLauncher => save_launcher(shell),
 
-        Message::AppearanceSelected(choice) => select_appearance(shell, choice),
+        Message::AppearanceSelected(choice) => return select_appearance(shell, choice),
         Message::DismissStatus(token) => {
             // A status line that has already been replaced keeps its successor on screen.
             if token == shell.status_token {
@@ -831,6 +858,13 @@ fn apply(shell: &mut AppShell, message: Message) -> Task<Message> {
             if let Err(error) = result {
                 shell.action_error = Some(format!("The panel could not be shown: {error}"));
             }
+        }
+        Message::CheckConfigFile(token) => {
+            if token != shell.config_check || !shell.panel_visible {
+                return Task::none();
+            }
+            check_config_file(shell);
+            return after(CONFIG_CHECK_INTERVAL, Message::CheckConfigFile(token));
         }
         Message::RefreshShadow => {
             if let Some(window_id) = shell.window_id {
@@ -1128,7 +1162,8 @@ fn window_opened(shell: &mut AppShell, window_id: iced::window::Id) -> Task<Mess
     // lives behind the menu-bar item. It waits a moment first: a status item that was just
     // created has not been laid out in the menu bar, and the panel hangs from where it is.
     Task::batch([
-        status_item::configure(window_id).map(Message::PanelCommand),
+        status_item::configure(window_id, crate::theme::is_dark(&shell.theme))
+            .map(Message::PanelCommand),
         after(MENU_BAR_SETTLE, Message::Panel(PanelEvent::Open)),
         live,
     ])
@@ -1141,8 +1176,15 @@ fn panel_event(shell: &mut AppShell, event: PanelEvent) -> Task<Message> {
     }
     match event {
         PanelEvent::Toggle => {
+            let caused_deactivation = shell
+                .deactivated_at
+                .take()
+                .is_some_and(|at| at.elapsed() < ITEM_CLICK_DEACTIVATION);
             if shell.panel_visible {
                 hide_panel(shell, true)
+            } else if caused_deactivation {
+                // The click already closed the panel by deactivating the app; it was a close.
+                Task::none()
             } else {
                 show_panel(shell)
             }
@@ -1159,7 +1201,10 @@ fn panel_event(shell: &mut AppShell, event: PanelEvent) -> Task<Message> {
         }
         PanelEvent::Quit => iced::exit(),
         // A click anywhere outside the panel makes another app active. A pinned panel stays.
-        PanelEvent::Deactivated if shell.panel_visible && !shell.pinned => hide_panel(shell, false),
+        PanelEvent::Deactivated if shell.panel_visible && !shell.pinned => {
+            shell.deactivated_at = Some(Instant::now());
+            hide_panel(shell, false)
+        }
         PanelEvent::Deactivated => Task::none(),
         PanelEvent::AccessibilityPress(index) => accessibility_press(shell, index),
     }
@@ -1198,7 +1243,16 @@ fn accessibility_press(shell: &mut AppShell, index: usize) -> Task<Message> {
 }
 
 /// Puts the panel under the menu-bar item, in front, with the search field ready for typing.
+///
+/// The config file is looked at first, so an edit made while the panel was hidden is already
+/// there when it appears, and then every few seconds while it stays open.
 fn show_panel(shell: &mut AppShell) -> Task<Message> {
+    check_config_file(shell);
+    shell.config_check += 1;
+    let checks = after(
+        CONFIG_CHECK_INTERVAL,
+        Message::CheckConfigFile(shell.config_check),
+    );
     shell.panel_visible = true;
     shell.menu_bar.set_highlighted(true);
     let Some(window_id) = shell.window_id else {
@@ -1209,7 +1263,28 @@ fn show_panel(shell: &mut AppShell) -> Task<Message> {
         status_item::show(window_id, top_left, !shell.reduce_motion).map(Message::PanelCommand),
         after(SHADOW_SETTLE, Message::RefreshShadow),
         focus(SEARCH_ID),
+        checks,
     ])
+}
+
+/// Takes in an edit made to the config file outside the app (see
+/// [`Application::check_config_file`]): loaded when nothing here is unsaved, a conflict when
+/// something is. A file that cannot be read is reported once, not on every check.
+fn check_config_file(shell: &mut AppShell) {
+    // A row or group being carried names something the reload could remove under it.
+    if shell.drag.is_some() || shell.group_drag.is_some() {
+        return;
+    }
+    match shell.application.check_config_file() {
+        Ok(_) => shell.config_check_error = None,
+        Err(error) => {
+            let message = error.to_string();
+            if shell.config_check_error.as_ref() != Some(&message) {
+                shell.action_error = Some(message.clone());
+                shell.config_check_error = Some(message);
+            }
+        }
+    }
 }
 
 /// Takes the panel off screen. Its state — the open sheet, the scroll position, the search — is
@@ -1461,8 +1536,8 @@ fn save_launcher(shell: &mut AppShell) {
 ///
 /// Every symbol is rasterized once per theme, so the icon set is rebuilt here rather than tinted
 /// on the fly; without that the old tints would survive the switch and disappear against the new
-/// ground.
-fn select_appearance(shell: &mut AppShell, choice: AppearanceChoice) {
+/// ground. The glass behind the panel is turned to match.
+fn select_appearance(shell: &mut AppShell, choice: AppearanceChoice) -> Task<Message> {
     shell.appearance = choice;
     let appearance = Appearance::resolve(choice);
     shell.reduce_motion = appearance.reduce_motion;
@@ -1470,6 +1545,12 @@ fn select_appearance(shell: &mut AppShell, choice: AppearanceChoice) {
     shell.icons = IconSet::load(&shell.theme);
     prepare_label_icons(shell);
     report(shell, shell.application.set_appearance(choice));
+    match shell.window_id {
+        Some(window_id) => {
+            status_item::set_appearance(window_id, appearance.dark).map(Message::PanelCommand)
+        }
+        None => Task::none(),
+    }
 }
 
 /// Checks that something is listening where the open draft says its server is.
@@ -3030,6 +3111,32 @@ mod tests {
         assert!(shell.panel_visible);
         send(&mut shell, Message::Panel(PanelEvent::Toggle));
         assert!(!shell.panel_visible);
+    }
+
+    #[test]
+    fn a_click_on_the_item_that_deactivates_the_app_first_still_closes_the_panel() {
+        let mut shell = shell_with_category(Section::Servers, "Production", "Web");
+        send(&mut shell, Message::Panel(PanelEvent::Toggle));
+
+        // The menu bar takes activation away, then delivers the click that did it.
+        send(&mut shell, Message::Panel(PanelEvent::Deactivated));
+        send(&mut shell, Message::Panel(PanelEvent::Toggle));
+        assert!(!shell.panel_visible, "the click closed the panel");
+
+        send(&mut shell, Message::Panel(PanelEvent::Toggle));
+        assert!(shell.panel_visible, "the next click opens it again");
+    }
+
+    #[test]
+    fn a_click_on_the_item_well_after_clicking_elsewhere_opens_the_panel() {
+        let mut shell = shell_with_category(Section::Servers, "Production", "Web");
+        send(&mut shell, Message::Panel(PanelEvent::Toggle));
+        send(&mut shell, Message::Panel(PanelEvent::Deactivated));
+        shell.deactivated_at =
+            std::time::Instant::now().checked_sub(std::time::Duration::from_secs(2));
+
+        send(&mut shell, Message::Panel(PanelEvent::Toggle));
+        assert!(shell.panel_visible);
     }
 
     #[test]
