@@ -124,7 +124,7 @@ fn write_bmp(path: &PathBuf, rgba: &[u8], width: u32, height: u32) -> io::Result
     file.extend_from_slice(&0u32.to_le_bytes());
     file.extend_from_slice(&0u32.to_le_bytes());
 
-    for pixel in rgba[..pixel_bytes as usize].chunks_exact(4) {
+    for pixel in rgba[..pixel_bytes as usize].as_chunks::<4>().0 {
         file.extend_from_slice(&[pixel[2], pixel[1], pixel[0], 255]);
     }
     fs::write(path, file)

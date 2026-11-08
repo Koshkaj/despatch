@@ -341,7 +341,7 @@ fn a_launcher_can_move_between_subgroups_of_one_group() {
         .move_launcher(moved, from, to, 0)
         .expect("move between subgroups");
 
-    assert!(config.groups[0].subgroups[0].items.is_empty());
+    assert_eq!(config.groups[0].subgroups[0].items, [] as [Launcher; 0]);
     assert_eq!(config.groups[0].subgroups[1].items[0].id(), moved);
 }
 

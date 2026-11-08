@@ -528,7 +528,7 @@ fn conflict_state_can_reload_external_data_or_save_a_copy() {
     assert!(harness.repository.document(copy_path).is_some());
 
     harness.app.reload().expect("reload source");
-    assert!(harness.app.state.config.groups.is_empty());
+    assert_eq!(harness.app.state.config.groups, [] as [Group; 0]);
     assert_eq!(harness.app.state.config_status, ConfigStatus::Clean);
 }
 
@@ -831,7 +831,7 @@ fn a_failed_launch_is_not_remembered() {
 
     assert!(app.launch_selected().is_err());
 
-    assert!(app.recent_launches().is_empty());
+    assert_eq!(app.recent_launches(), [] as [RecentLaunch; 0]);
     assert!(recents.saved.lock().expect("recents lock").is_empty());
 }
 
@@ -880,7 +880,7 @@ fn launches_of_launchers_that_no_longer_exist_are_not_listed() {
             used_at: std::time::SystemTime::UNIX_EPOCH,
         });
     let (mut harness, ids) = recents_harness(recents.clone());
-    assert!(harness.app.recent_launches().is_empty());
+    assert_eq!(harness.app.recent_launches(), [] as [RecentLaunch; 0]);
 
     launch(&mut harness, ids[2]);
 
@@ -917,7 +917,7 @@ fn the_history_is_capped_and_can_be_cleared() {
     assert_eq!(remembered[0].launcher_id, *ids.last().expect("a launcher"));
 
     harness.app.clear_recents().expect("clear");
-    assert!(harness.app.recent_launches().is_empty());
+    assert_eq!(harness.app.recent_launches(), [] as [RecentLaunch; 0]);
     assert!(recents.stored.lock().expect("recents lock").is_empty());
 }
 

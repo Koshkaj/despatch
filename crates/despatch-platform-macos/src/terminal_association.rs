@@ -155,7 +155,7 @@ mod tests {
     #[test]
     fn reading_the_real_preferences_never_panics_and_yields_a_plausible_bundle_id() {
         if let Some(bundle_id) = super::preferred_terminal_bundle_id() {
-            assert!(!bundle_id.trim().is_empty());
+            assert_ne!(bundle_id.trim(), "");
             assert!(bundle_id.contains('.'), "{bundle_id} is not a bundle id");
         }
     }

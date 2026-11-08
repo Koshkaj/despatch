@@ -174,7 +174,7 @@ mod tests {
             Shortcut::Close,
             Shortcut::Quit,
         ] {
-            assert!(!equivalent(shortcut).is_empty());
+            assert_ne!(equivalent(shortcut), "");
         }
     }
 }

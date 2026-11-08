@@ -250,7 +250,7 @@ mod tests {
         }));
 
         assert_eq!(surface.arguments().len(), 2);
-        assert!(surface.arguments()[1].is_empty());
+        assert_eq!(surface.arguments()[1], "");
     }
 
     #[test]

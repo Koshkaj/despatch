@@ -138,11 +138,11 @@ fn copy_rgba(bitmap: &NSBitmapImageRep) -> Option<SystemSymbolPixels> {
     for row in source.chunks_exact(bytes_per_row) {
         // AppKit bitmap contexts are premultiplied; keep only the coverage so callers can tint the
         // mask with straight alpha instead of inheriting darkened antialiased edges.
-        for pixel in row[..CANVAS_SIZE * 4].chunks_exact(4) {
+        for pixel in row[..CANVAS_SIZE * 4].as_chunks::<4>().0 {
             rgba.extend_from_slice(&[u8::MAX, u8::MAX, u8::MAX, pixel[3]]);
         }
     }
-    if rgba.chunks_exact(4).all(|pixel| pixel[3] == 0) {
+    if rgba.as_chunks::<4>().0.iter().all(|pixel| pixel[3] == 0) {
         return None;
     }
     Some(SystemSymbolPixels {

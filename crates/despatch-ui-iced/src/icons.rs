@@ -226,7 +226,9 @@ struct Mask {
 /// Replaces the color channels of a white coverage mask, leaving its antialiased alpha intact.
 fn tinted(mask: &[u8], color: Color) -> Vec<u8> {
     let rgba = color.into_rgba8();
-    mask.chunks_exact(4)
+    mask.as_chunks::<4>()
+        .0
+        .iter()
         .flat_map(|pixel| [rgba[0], rgba[1], rgba[2], scale_alpha(pixel[3], color.a)])
         .collect()
 }
@@ -265,8 +267,8 @@ mod tests {
     #[test]
     fn every_symbol_declares_a_name_and_a_voiceover_label() {
         for symbol in Symbol::ALL {
-            assert!(!symbol.name().trim().is_empty());
-            assert!(!symbol.accessibility_label().trim().is_empty());
+            assert_ne!(symbol.name().trim(), "");
+            assert_ne!(symbol.accessibility_label().trim(), "");
         }
     }
 

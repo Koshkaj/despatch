@@ -52,7 +52,10 @@ fn a_missing_history_is_empty() {
     let directory = tempfile::tempdir().expect("temporary directory");
     let store = JsonRecentLaunches::new(directory.path().join("recents.json"));
 
-    assert!(store.load().expect("missing is not an error").is_empty());
+    assert_eq!(
+        store.load().expect("missing is not an error"),
+        [] as [RecentLaunch; 0]
+    );
 }
 
 #[test]
@@ -63,7 +66,10 @@ fn a_damaged_history_is_empty_and_never_touches_the_config_beside_it() {
     std::fs::write(directory.path().join("recents.json"), b"{ not json").expect("write");
     let store = JsonRecentLaunches::beside(&config);
 
-    assert!(store.load().expect("damage is not fatal").is_empty());
+    assert_eq!(
+        store.load().expect("damage is not fatal"),
+        [] as [RecentLaunch; 0]
+    );
     assert_eq!(
         std::fs::read(&config).expect("config still readable"),
         b"{\"untouched\": true}"
@@ -76,10 +82,8 @@ fn a_history_from_a_future_format_is_ignored_rather_than_misread() {
     let path = directory.path().join("recents.json");
     std::fs::write(&path, b"{\"version\": 9, \"recent\": []}").expect("write");
 
-    assert!(
-        JsonRecentLaunches::new(path)
-            .load()
-            .expect("not fatal")
-            .is_empty()
+    assert_eq!(
+        JsonRecentLaunches::new(path).load().expect("not fatal"),
+        [] as [RecentLaunch; 0]
     );
 }

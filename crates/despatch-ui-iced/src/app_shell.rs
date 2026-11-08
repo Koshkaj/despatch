@@ -2836,10 +2836,10 @@ mod tests {
         EphemeralRecentLaunches, FileRevealer, LaunchRequest, LocalPreferences, PortError,
         PortErrorKind, RepositorySaveExpectation, TerminalLauncher,
     };
-    use despatch_domain::{AppConfig, GroupId, Launcher, LauncherId, Section, SubgroupId};
+    use despatch_domain::{AppConfig, Group, GroupId, Launcher, LauncherId, Section, SubgroupId};
 
     use crate::editor::Field;
-    use crate::presenters::Destination;
+    use crate::presenters::{Destination, ListRow};
     use crate::shortcuts::Shortcut;
     use crate::status_item::PanelEvent;
 
@@ -3316,7 +3316,7 @@ mod tests {
 
         send(&mut shell, Message::SelectDestination(Destination::Recent));
 
-        assert!(shell.application.state.search_query.is_empty());
+        assert_eq!(shell.application.state.search_query, "");
     }
 
     #[test]
@@ -3336,7 +3336,7 @@ mod tests {
         assert_eq!(rows[0].trailing.as_deref(), Some("Just now"));
 
         send(&mut shell, Message::ClearRecents);
-        assert!(shell.rows().is_empty());
+        assert_eq!(shell.rows(), [] as [ListRow; 0]);
     }
 
     #[test]
@@ -3452,7 +3452,7 @@ mod tests {
         send(&mut shell, Message::DraftCategorySelected(target));
         send(&mut shell, Message::SaveLauncher);
 
-        assert!(category_names(&shell, source).is_empty());
+        assert_eq!(category_names(&shell, source), [] as [String; 0]);
         assert_eq!(category_names(&shell, target), ["API server"]);
         assert_eq!(shell.segment, Some(target));
         assert_eq!(shell.application.state.selected_launcher, Some(launcher_id));
@@ -3633,7 +3633,7 @@ mod tests {
 
         send(&mut shell, Message::DeleteGroupRequested(group_id));
         send(&mut shell, Message::ConfirmDelete);
-        assert!(shell.application.state.config.groups.is_empty());
+        assert_eq!(shell.application.state.config.groups, [] as [Group; 0]);
         assert_eq!(shell.destination, None);
         assert_eq!(shell.segment, None);
     }
@@ -3870,7 +3870,7 @@ mod tests {
         drag_onto(&mut shell, launcher_id, None);
 
         assert_eq!(category_names(&shell, source), ["API server"], "it stayed");
-        assert!(category_names(&shell, target).is_empty());
+        assert_eq!(category_names(&shell, target), [] as [String; 0]);
         assert_eq!(shell.drag, None);
     }
 
@@ -3893,7 +3893,7 @@ mod tests {
         send(&mut shell, Message::HoverSubgroup(Some(target)));
         send(&mut shell, Message::PointerReleased);
         assert_eq!(category_names(&shell, target), ["API server"]);
-        assert!(category_names(&shell, source).is_empty());
+        assert_eq!(category_names(&shell, source), [] as [String; 0]);
     }
 
     #[test]
@@ -3943,7 +3943,7 @@ mod tests {
         send(&mut shell, Message::HoverSubgroup(Some(target)));
         send(&mut shell, Message::PointerReleased);
         assert_eq!(category_names(&shell, target), ["API server"]);
-        assert!(category_names(&shell, source).is_empty());
+        assert_eq!(category_names(&shell, source), [] as [String; 0]);
     }
 
     #[test]
@@ -3955,7 +3955,7 @@ mod tests {
         send(&mut shell, Message::PointerReleased);
 
         assert_eq!(category_names(&shell, source), ["API server"]);
-        assert!(category_names(&shell, target).is_empty());
+        assert_eq!(category_names(&shell, target), [] as [String; 0]);
     }
 
     #[test]
@@ -3970,7 +3970,7 @@ mod tests {
 
         assert_eq!(shell.drag, None);
         assert_eq!(category_names(&shell, source), ["API server"]);
-        assert!(category_names(&shell, target).is_empty());
+        assert_eq!(category_names(&shell, target), [] as [String; 0]);
     }
 
     #[test]
@@ -4254,7 +4254,7 @@ mod tests {
         send(&mut shell, Message::NameChanged("   ".to_owned()));
         send(&mut shell, Message::SaveName);
 
-        assert!(shell.application.state.config.groups.is_empty());
+        assert_eq!(shell.application.state.config.groups, [] as [Group; 0]);
         assert!(shell.name_draft.is_some());
     }
 

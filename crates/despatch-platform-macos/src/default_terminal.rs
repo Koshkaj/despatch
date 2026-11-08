@@ -682,7 +682,7 @@ mod tests {
         launcher.launch(&request()).expect("launch command file");
 
         let requests = invoker.requests.lock().expect("open request lock");
-        assert!(requests[0].application_arguments.is_empty());
+        assert_eq!(requests[0].application_arguments, [] as [String; 0]);
         assert_eq!(requests[0].arguments.len(), 1);
         fs::remove_file(&requests[0].arguments[0]).expect("clean up staged script");
     }
@@ -712,7 +712,7 @@ mod tests {
 
     #[test]
     fn every_choice_describes_itself_for_the_settings_sheet() {
-        assert!(!TerminalChoice::SystemAssociation.describe().is_empty());
+        assert_ne!(TerminalChoice::SystemAssociation.describe(), "");
         let unknown = TerminalChoice::Chosen("com.example.not-installed".to_owned());
         assert_eq!(unknown.describe(), "com.example.not-installed");
     }

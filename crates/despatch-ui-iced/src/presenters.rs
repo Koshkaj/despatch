@@ -525,8 +525,8 @@ mod tests {
     };
 
     use super::{
-        Destination, advance, ellipsize, fitting_segments, footer_rows, launcher_count, list_rows,
-        pane_heading, relative_time, segments, sidebar_groups, subgroup_count,
+        Destination, ListRow, advance, ellipsize, fitting_segments, footer_rows, launcher_count,
+        list_rows, pane_heading, relative_time, segments, sidebar_groups, subgroup_count,
     };
 
     fn ssh(name: &str, host: &str) -> Launcher {
@@ -715,15 +715,15 @@ mod tests {
     fn settings_lists_no_launchers() {
         let (state, _) = state();
 
-        assert!(
+        assert_eq!(
             list_rows(
                 &state,
                 Some(Destination::Settings),
                 None,
                 &[],
                 SystemTime::now()
-            )
-            .is_empty()
+            ),
+            [] as [ListRow; 0]
         );
     }
 
